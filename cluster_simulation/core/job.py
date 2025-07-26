@@ -6,11 +6,12 @@ from core.config import *
 
 class Job(object):
 
-    def __init__(self, create_time, job_type_id, job_id):
+    def __init__(self, create_time, job_type_id, job_id, client_id, slo):
         """
         A job is a unique object across the simulation execution that has a specific graph of task dependencies (job_type_id)
         """
 
+        self.client_id = client_id
         self.id = job_id  # unique ID for each job
         self.job_type_id = job_type_id
         self.job_name, self.tasks = None, []  # List of Task objects
@@ -22,6 +23,7 @@ class Job(object):
         self.completed_tasks = []
         self.create_time = create_time  
         self.end_time = create_time
+        self.slo = 0 if SLO_GRANULARITY == "TASK" else slo
 
 
     def __hash__(self):
@@ -38,12 +40,11 @@ class Job(object):
     def __str__(self):
         return "JobID: {}".format(self.id)
 
-    def get_task_by_id(self, task_id):
+    def get_task_by_id(self, task_id) -> Task:
         for task in self.tasks:
             if task.task_id == task_id:
                 return task
         return None
-
 
     def assign_ADFG(self, ADFG):
         """
@@ -77,14 +78,23 @@ class Job(object):
             if task_cfg["MODEL_ID"] > -1:
                 required_model_for_task = Model(job_type_id=job_cfg["JOB_TYPE"],
                                                 model_id=task_cfg["MODEL_ID"],
-                                                model_size=task_cfg["MODEL_SIZE"])
+                                                model_size=task_cfg["MODEL_SIZE"],
+                                                batch_sizes=task_cfg["BATCH_SIZES"],
+                                                batch_exec_times=task_cfg["MIG_BATCH_EXEC_TIMES"],
+                                                exec_time_cv=task_cfg["EXEC_TIME_CV"])
 
-            current_task = Task(self.id,  # ID of the associated unique Job
+            current_task = Task(self,
+                                self.id,  # ID of the associated unique Job
                                 task_cfg["TASK_INDEX"],  # taskID
+                                (self.job_type_id, task_cfg["TASK_INDEX"]), # task type
                                 task_cfg["EXECUTION_TIME"], 
                                 required_model_for_task, 
                                 task_cfg["INPUT_SIZE"],
-                                task_cfg["OUTPUT_SIZE"])  
+                                task_cfg["OUTPUT_SIZE"],
+                                task_cfg["MAX_BATCH_SIZE"],
+                                task_cfg["MAX_WAIT_TIME"],
+                                task_cfg["SLO"] if SLO_GRANULARITY == "TASK" else 0,
+                                task_cfg["MAX_EMIT_BATCH_SIZE"])
 
             self.tasks.append(current_task)
 
@@ -95,11 +105,26 @@ class Job(object):
             for next_idx in job_cfg["TASKS"][current_task_index]["NEXT_TASK_INDEX"]:
                 self.tasks[current_task_index].next_task_ids.append(next_idx)
 
-    def finished_task(self, task):
+    def finished_task(self, task: Task) -> bool:
         for f_task in self.completed_tasks:
             if task.job_id == self.id and task.task_id == f_task[0].task_id:
                 return True
         return False
+    
+    def remaining_tasks(self) -> list[Task]:
+        return list(filter(lambda t: t.task_id not in self.completed_tasks, self.tasks))
+    
+    def newly_available_tasks(self, newly_completed: Task) -> list[Task]:
+        """
+            Returns a list of incomplete tasks that are now ready for
+            execution given the completion of [newly_completed] task.
+        """
+        ready_tasks = []
+        for task in self.remaining_tasks():
+            if newly_completed.task_id in task.required_task_ids and \
+                all(t in self.completed_tasks for t in task.required_task_ids):
+                ready_tasks.append(task)
+        return ready_tasks
 
     def print_job_info(self):
         for task in self.tasks:

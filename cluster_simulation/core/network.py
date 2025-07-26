@@ -15,14 +15,16 @@ def CPU_to_CPU_delay(message_size) -> float:
     Return the delay in ms
     """
 
-    if message_size < 1:
-        return 2E-3  # 2 microseconds
-    elif message_size < (1 << 2):  # messages of size between 1 and 4 kB
-        through_put = (3 + message_size * 2) * (1 << 20) / 1000
-        return (message_size / through_put) + FIXED_COST_GROUP_FORMATION
-    else:
-        through_put = 12 * 1048.58 # (kB/ms) Using the numbers from Cascade's benchmark
-        return (message_size / through_put) + FIXED_COST_GROUP_FORMATION
+    # if message_size < 1:
+    #     return 2E-3  # 2 microseconds
+    # elif message_size < (1 << 2):  # messages of size between 1 and 4 kB
+    #     through_put = (3 + message_size * 2) * (1 << 20) / 1000
+    #     return (message_size / through_put) + FIXED_COST_GROUP_FORMATION
+    # else:
+    #     through_put = 12 * 1048.58 # (kB/ms) Using the numbers from Cascade's benchmark
+    #     return (message_size / through_put) + FIXED_COST_GROUP_FORMATION
+
+    return message_size / 250000
 
 
 def SameMachineCPUtoGPU_delay(message_size) -> float:
@@ -31,8 +33,9 @@ def SameMachineCPUtoGPU_delay(message_size) -> float:
     Returns delay in ms
     """
 
-    through_put = 9.7 * 1048.58  # (kB/ms) Using the numbers from Cascade's benchmark
-    return (message_size / through_put) 
+    pcie_bw = 64000
+    # through_put = 9.7 * 1048.58  # (kB/ms) Using the numbers from Cascade's benchmark
+    return (message_size / pcie_bw) 
 
 
 def UplinkEdgeToCloud_delay(message_size) -> float:
@@ -68,8 +71,9 @@ def SameMachineGPUtoCPU_delay(message_size):
     message_size expressed in kB
     Returns delay in ms
     """
-    through_put = 9.7 * 1048.58   # (kB/ms) Using the numbers from Cascade's benchmark
-    return (message_size / through_put) 
+    pcie_bw = 64000
+    # through_put = 9.7 * 1048.58   # (kB/ms) Using the numbers from Cascade's benchmark
+    return (message_size / pcie_bw) 
 
 
 def GPU_to_GPU_delay(message_size) -> float:
