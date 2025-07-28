@@ -1,8 +1,6 @@
-from queue import PriorityQueue
-
 from core.simulation import *
 from core.config import *
-from schedulers.algo.nav_heft_algo import *
+
 from workers.taskworker import *
 
 
@@ -16,21 +14,8 @@ class Simulation_decentral(Simulation):
                             job_types_list=job_types_list,\
                             produce_breakdown=produce_breakdown)
 
-        self.remaining_jobs = TOTAL_NUM_OF_JOBS
-        self.event_queue = PriorityQueue()
-        
         self.consider_load, self.consider_cache = consider_load, consider_cache
-
         self.initialize_workers()
-        self.initialize_external_clients()
-
-
-    def initialize_workers(self):
-        if(self.job_split == "PER_TASK"):
-            for i in range(self.total_workers):
-                self.workers.append(TaskWorker(self, self.slots_per_worker, i))
-            # self.initialize_model_placement_at_workers()
-
 
     def add_job_completion_time(self, job_id, task_id, completion_time):
         job_is_completed = self.jobs[job_id].job_completed(
@@ -38,16 +23,21 @@ class Simulation_decentral(Simulation):
         if job_is_completed:
             self.remaining_jobs -= 1
 
-
     def run(self):
-        client_initialize_interval = DEFAULT_CREATION_INTERVAL_PERCLIENT / len(self.external_clients)
-        for external_client_id in range(len(self.external_clients)):
-            self.event_queue.put(EventOrders(
-                external_client_id * client_initialize_interval, \
-                JobCreationAtExternalClient(self, external_client_id)))
+        self.generate_all_jobs()
+
         last_time = 0
-        while self.remaining_jobs > 0:
+        while (self.remaining_jobs - len(self.task_drop_log)) > 0:
             cur_event = self.event_queue.get()
+
+            print(cur_event.to_string())
+            print(f"Jobs left: {self.remaining_jobs}")
+
+            worker_id = -1
+            if type(cur_event.event).is_worker_event():
+                worker_id = cur_event.event.worker.worker_id
+            self.event_log.loc[len(self.event_log)] = [cur_event.current_time, worker_id, cur_event.event.to_string()]
+
             assert cur_event.current_time >= last_time
             last_time = cur_event.current_time
             new_events = cur_event.event.run(cur_event.current_time)
@@ -55,5 +45,3 @@ class Simulation_decentral(Simulation):
                 last_time = cur_event.current_time
                 self.event_queue.put(new_event)
         self.run_finish(last_time, by_job_type=True)
-        
-        

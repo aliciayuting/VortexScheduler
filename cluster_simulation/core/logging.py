@@ -1,7 +1,8 @@
 class TaskLifeCycleTimestamp(object):
-    def __init__(self, job_id, task_id):
+    def __init__(self, job_id, task_id, is_initial_task=False):
         self.job_id = job_id
         self.task_id = task_id
+        self.is_initial_task = is_initial_task
         self.job_creation_timestamp = 0
         self.task_arrival_at_worker_buffer_timestamp = 0
         self.task_placed_on_worker_queue_timestamp = 0
@@ -9,6 +10,8 @@ class TaskLifeCycleTimestamp(object):
         self.task_front_queue_timestamp = 0
         self.task_execution_start_timestamp = 0
         self.task_execution_end_timestamp = 0
+        self.task_arrival_at_scheduler_timestamp = 0
+        self.task_placed_on_global_queue_timestamp = 0 # QLM
 
     def set_task_arrival_at_worker_buffer_timestamp(self, timestamp):
         """
@@ -26,7 +29,7 @@ class TaskLifeCycleTimestamp(object):
         self.task_placed_on_worker_queue_timestamp = timestamp
         # for initial task since it doesn't have any dependent tasks,
         # once it arrives at the worker, it skips the step of buffer, and is directly placed on the worker queue
-        if self.task_id == 0:
+        if self.is_initial_task:
             self.task_arrival_at_worker_buffer_timestamp = timestamp
 
     def get_model_fetch_time(self):

@@ -1,22 +1,30 @@
-from pickle import NONE
 from core.config import *
 from core.network import *
 from core.config import *
-import sys
+
+from workers.gpu_state import *
+
+import pandas as pd
 
 
 class Worker(object):
     """ Abstract class representing workers. """
 
-    def __init__(self, simulation, num_free_slots, worker_id):
+    _abandoned_batches = []
+
+    def __init__(self, simulation, worker_id, total_memory, group_id=-1):
+        assert(total_memory in [24, 12, 6])
+
+        self.group_id = group_id
         self.worker_id = worker_id
         self.simulation = simulation
-        self.num_free_slots = num_free_slots
-        self.GPU_memory_models = []
-        # Keep track of the list of models sitting in GPU memory at time: 
-        # {time-> list of model objects} : [ (time1,[model0,model1,]), (time2,[model1,...]),...]
-        self.GPU_memory_models_history = []
+        self.total_memory = total_memory
         
+        self.GPU_memory_models = []
+        self.GPU_state = GPUState(total_memory * (10**6))
+
+        self.model_history_log = pd.DataFrame(columns=["start_time", "end_time",
+                                                       "model_id", "placed_or_evicted"])
 
     def __hash__(self):
         return hash(self.worker_id)
@@ -45,124 +53,126 @@ class Worker(object):
                 model, self.worker_id, 0)
             return 1
         return 1
+    
+    """ ----------  BATCH TRACKING AND MANAGEMENT  ---------- """
+    
+    def evict_batch(self, batch_id: int, time: float):
+        evicted_batch = None
+        for s in self.GPU_state.state_at(time):
+            if s.reserved_batch and s.reserved_batch.id == batch_id:
+                evicted_batch = s.reserved_batch
+                break
+        self.GPU_state.release_busy_model(batch_id, time)
+        Worker._abandoned_batches.append(batch_id)
+        return evicted_batch
 
-    def used_GPUmemory(self, current_time, info_staleness=0, requiring_worker_id=None) -> int:
-        """
-        Helper function for local GPU memory usage check
-        """
-        if requiring_worker_id == self.worker_id:
-            info_staleness = 0
-        models = self.get_model_history(current_time, info_staleness)
-        return sum(m.model_size for m in models)
-
-    #  ----------  LOCAL MEMORY MANAGEMENT AND RETRIEVE  ----------"""
-    def fetch_model(self, model, current_time):
-        """
-        Return: model transfer time required to execute the Task
-        Every "task" requires one "model" to be executed correctly
-        add this information to 2 histories:  
-            1. model_history on worker
-            2. cache_history on metadata_service
-        """
-        if model is None:
+    def did_abandon_batch(self, batch_id: int):
+        return batch_id in Worker._abandoned_batches
+    
+    """ ----------  LOCAL MEMORY MANAGEMENT  ---------- """
+    
+    def fetch_model(self, model, batch, current_time, exec_time=-1):
+        if model == None or self.GPU_state.does_have_idle_copy(model, current_time):
             return 0
-        # First check if the model is stored locally: either on GPU, or systemRAM(home node)
-        w_models = self.get_model_history(current_time, info_staleness=0)
-        # case1: if it is in local GPU already
-        if model in w_models:
-            return 0
+        
         fetch_time = 0
         fetch_time = SameMachineCPUtoGPU_delay(model.model_size)
+
+        reserve_until = -1 if exec_time < 0 else (current_time + fetch_time + exec_time)
+
         self.simulation.metadata_service.add_model_cached_location(
             model, self.worker_id, current_time + fetch_time)
-        self.add_model_to_memory_history(model, current_time + fetch_time)
-        eviction_time = self.evict_model_from_GPU(current_time + fetch_time)
-        return fetch_time + eviction_time
+        self.GPU_state.fetch_model(model, current_time, fetch_time, 
+                                   reserved_batch=batch, reserve_until=reserve_until)
+        
+        self.model_history_log.loc[len(self.model_history_log)] = {
+            "start_time": current_time,
+            "end_time": current_time + fetch_time,
+            "model_id": model.model_id,
+            "placed_or_evicted": "placed"
+        }
 
-    def evict_model_from_GPU(self, current_time):
+        return fetch_time
+
+    LOOKAHEAD_EVICTION = 0
+    FCFS_EVICTION = 1
+
+    def evict_models_from_GPU_until(self, current_time: float, min_required_memory: int, policy: int) -> float:
         """
-        Do nothing if current cached models didn't exceed the GPU memory
-        remove this information to 2 histories:  
-            1. model_history on worker
-            2. cache_history on metadata_service
+            Evicts models from GPU according to FCFS or lookahead eviction policy until at least
+            min_required_memory space is available. Returns time taken to execute model
+            evictions. 0 if min_required_memory could not be created.
+            Assumes batches run in earliest task arrival order.
         """
-        models_in_GPU = self.get_model_history(current_time, info_staleness=0)
-        models_total_size = 0
-        for model in models_in_GPU:
-            models_total_size += model.model_size
-        eviction_index = 0
-        eviction_duration = 0
-        while(models_total_size > GPU_MEMORY_SIZE):
-            rm_model = models_in_GPU[eviction_index]
-            self.simulation.metadata_service.rm_model_cached_location(
-                rm_model, self.worker_id, current_time)
-            self.rm_model_in_memory_history(rm_model, current_time)
-            models_total_size -= rm_model.model_size
-            eviction_index += 1
-            eviction_duration += SameMachineGPUtoCPU_delay(rm_model.model_size)
-        return eviction_duration
+        curr_memory = self.GPU_state.available_memory(current_time)
+       
+        placed_model_states = self.GPU_state.placed_model_states(current_time)
+        if policy == self.LOOKAHEAD_EVICTION:
+            # TODO: try different eviction policies
+            raise NotImplementedError("No lookahead yet")
+            # next_models = self.get_next_models(3, current_time)
+            # placed_model_states = sorted(
+            #     placed_model_states,
+            #     key=lambda m: next_models.index(m.model) if m.model in next_models else len(next_models),
+            #     reverse=True
+            # )
+
+        models_to_evict = []
+        for state in placed_model_states:
+            if not state.reserved_batch:
+                curr_memory += state.model.model_size
+                models_to_evict.append(state.model)
+                if curr_memory >= min_required_memory:
+                    # model_evict_times = list(map(lambda m: SameMachineGPUtoCPU_delay(m.model_size), models_to_evict))
+                    # eviction_duration = max(model_evict_times)
+                    # full_eviction_end = current_time + eviction_duration
+
+                    # must reserve space to prevent other models from loading in space created here
+                    # extra_to_reserve = min_required_memory - sum(m.model_size for m in models_to_evict)
+                    # if extra_to_reserve > 0:
+                    #     self.GPU_state.reserve_model_space(None, extra_to_reserve, current_time, full_eviction_end)
+
+                    for i in range(len(models_to_evict)):
+                        self.simulation.metadata_service.rm_model_cached_location(
+                            models_to_evict[i], self.worker_id, current_time)
+                        self.GPU_state.evict_model(models_to_evict[i], current_time, 0)
+                        
+                        self.model_history_log.loc[len(self.model_history_log)] = {
+                            "start_time": current_time,
+                            "end_time": current_time ,
+                            "model_id": models_to_evict[i].model_id,
+                            "placed_or_evicted": "evicted"
+                        }
+                    return 0
+        return 0
+    
+    _CAN_RUN_NOW = 0
+    _CAN_RUN_ON_EVICT = 1
+    _CANNOT_RUN = 2
+
+    def can_run_task(self, current_time: float, model: Model) -> int:
+        """
+            Returns _CAN_RUN_NOW if model None, or model is on GPU and not currently in use.
+            Returns _CAN_RUN_ON_EVICT if model can be loaded onto the GPU upon evicting
+            unused models.
+            Returns _CANNOT_RUN otherwise.
+        """
+        if model == None or self.GPU_state.does_have_idle_copy(model, current_time):
+            return self._CAN_RUN_NOW
+        
+        # cannot load additional copies of the same model
+        if any(map(lambda s: s.model == model, self.GPU_state.state_at(current_time))):
+            return self._CANNOT_RUN
+        
+        if self.GPU_state.can_fetch_model(model, current_time):
+            return self._CAN_RUN_NOW
+        
+        if self.GPU_state.can_fetch_model_on_eviction(model, current_time):
+            return self._CAN_RUN_ON_EVICT
+        
+        return self._CANNOT_RUN
 
     # ------------------------- cached model history update helper functions ---------------
-    def add_model_to_memory_history(self, model, current_time):
-        assert (model.model_size <= GPU_MEMORY_SIZE)
-        last_index = len(self.GPU_memory_models_history) - 1
-        # 0. base case
-        if last_index == -1:
-            self.GPU_memory_models_history.append((current_time, [model]))
-            return
-        # 1. Find the time_stamp place to add this queue information
-        while last_index >= 0:
-            if self.GPU_memory_models_history[last_index][0] == current_time:
-                if model not in self.GPU_memory_models_history[last_index][1]:
-                    self.GPU_memory_models_history[last_index][1].append(model)
-                break
-            if self.GPU_memory_models_history[last_index][0] < current_time:
-                if model not in self.GPU_memory_models_history[last_index][1]:
-                    next_queue = self.GPU_memory_models_history[last_index][1].copy(
-                    )
-                    next_queue.append(model)
-                    last_index += 1
-                    self.GPU_memory_models_history.insert(
-                        last_index, (current_time, next_queue)
-                    )
-                break
-            # check the previous entry
-            last_index -= 1
-        # 2. added the worker_id to all the subsequent timestamp tuples
-        while last_index < len(self.GPU_memory_models_history):
-            if model not in self.GPU_memory_models_history[last_index][1]:
-                self.GPU_memory_models_history[last_index][1].append(model)
-            last_index += 1
-
-    def rm_model_in_memory_history(self, model, current_time):
-        last_index = len(self.GPU_memory_models_history) - 1
-        # 0. base case: shouldn't happen
-        if last_index == -1:
-            AssertionError("rm model cached location to an empty list")
-            return
-        # 1. find the place to add this remove_event to the tuple list
-        while last_index >= 0:
-            if self.GPU_memory_models_history[last_index][0] == current_time:
-                if model in self.GPU_memory_models_history[last_index][1]:
-                    self.GPU_memory_models_history[last_index][1].remove(model)
-                break
-            if self.GPU_memory_models_history[last_index][0] < current_time:
-                if model in self.GPU_memory_models_history[last_index][1]:
-                    next_tasks_in_memory = self.GPU_memory_models_history[last_index][1].copy(
-                    )
-                    next_tasks_in_memory.remove(model)
-                    last_index = last_index + 1
-                    self.GPU_memory_models_history.insert(
-                        last_index, (current_time, next_tasks_in_memory)
-                    )
-                break
-            last_index -= 1  # go to prev time
-        # 2. remove the task from all the subsequent tuple
-        while last_index < len(self.GPU_memory_models_history):
-            if model in self.GPU_memory_models_history[last_index]:
-                self.GPU_memory_models_history[last_index][1].remove(model)
-            last_index += 1  # do this for the remaining element after
-
     def get_history(self, history, current_time, info_staleness) -> list:
         delayed_time = current_time - info_staleness
         last_index = len(history) - 1
@@ -171,10 +181,3 @@ class Worker(object):
                 return history[last_index][1].copy()
             last_index -= 1  # check the previous one
         return []
-
-    def get_model_history(self, current_time, info_staleness=0, requiring_workerid= None) -> list:
-        if requiring_workerid == self.worker_id:
-            info_staleness = 0
-        return self.get_history(self.GPU_memory_models_history, current_time, info_staleness)
-
-
