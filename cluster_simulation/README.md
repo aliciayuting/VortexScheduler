@@ -7,8 +7,7 @@ This Repository contains the Simulation code to run Navigator on Customized work
 ##  Run simulation
 ### 1. set environment variable at the terminal 
 #### * For Unix/Linux
-export SIMULATION_DIR=/path/to/simulation/directory
-export PYTHONPATH="${PYTHONPATH}:{SIMULATION_DIR}"
+`source set_env.sh`
 #### * For Windows
 set PYTHONPATH=%PYTHONPATH%;C:\path\to\directory\
 
@@ -18,6 +17,6 @@ set PYTHONPATH=%PYTHONPATH%;C:\path\to\directory\
 User can set customized system configuration at /core/config.py and /core/workflow.py.
 
 #### 2.2 Run simulation
-Run the python file, /experiments/run_experiments.py , to start the simulation and generate logging data at ./experiment
+Run the python file, /experiments/run_experiment.py , to start the simulation and generate logging data at ./experiment. Defaults to `experiments/results` if path to output directory `-o` is not specified.
 
-``` python ./run_experiments.py <experiment_scheduler0> <experiment_scheduler1> ..(centralheft|decentralheft|hashtask) ```
+``` python run_experiment.py -t {centralheft,decentralheft,shepherd,hashtask} [-o OUT] ```

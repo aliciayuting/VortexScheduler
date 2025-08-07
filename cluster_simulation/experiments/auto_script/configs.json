@@ -1,0 +1,47 @@
+{
+    "CONFIGS": [
+        {
+            "TOTAL_NUM_OF_NODES": 4,
+            "CLIENT_CONFIGS": [
+                {"0": {
+                    "NUM_JOBS": 2500,
+                    "SEND_RATES": [55],
+                    "SEND_RATE_CHANGE_INTERVALS": [], 
+                    "SLO": "np.inf"
+                }}
+            ],
+            "WORKLOAD_DISTRIBUTION": "CONSTANT",
+            "HERD_PERIODICITY": 0,
+            "SLO_SLACK": 0.1,
+            "ENABLE_MULTITHREADING": true,
+            "ENABLE_MODEL_PREFETCH": true,
+            "ENABLE_DYNAMIC_MODEL_LOADING": false,
+            "ALLOCATION_STRATEGY": "CUSTOM",
+            "CUSTOM_ALLOCATION": [
+                {"24": [1]}, {"24": [1]}, {"24": [1]}, 
+                {"6": [3]}, {"6": [3]},{"6": [3]}, {"6": [0,2]}],
+            "SCHEDULER_TYPE": "hashtask",
+            "OUT_PATH": "ht-p1-55-test"
+        },
+        {
+            "TOTAL_NUM_OF_NODES": 8,
+            "CLIENT_CONFIGS": [
+                {"0": {
+                    "NUM_JOBS": 2000,
+                    "SEND_RATES": [55, 125],
+                    "SEND_RATE_CHANGE_INTERVALS": [1000], 
+                    "SLO": 100
+                }}
+            ],
+            "HERD_PERIODICITY": 20000,
+            "SLO_SLACK": 0.1,
+            "ENABLE_MULTITHREADING": false,
+            "ENABLE_MODEL_PREFETCH": true,
+            "ENABLE_DYNAMIC_MODEL_LOADING": true,
+            "ALLOCATION_STRATEGY": "HERD",
+            "CUSTOM_ALLOCATION": [],
+            "SCHEDULER_TYPE": "shepherd",
+            "OUT_PATH": "shep-55-125-test"
+        }
+    ]
+}
