@@ -220,30 +220,19 @@ def solve_ilp(N, B, d, batch_runtimes):
             # This is equivalent to: s[j_prime] <= M * s[j] where M is a large constant
             model.addConstr(s[j_prime] <= B * s[j], name=f"sequential_{j}_{j_prime}")
 
-    # Constraint 4: e_j = sum_{k=1}^j f(s_k), forall j
+    # Model constraint 4 with fitted linear model.
     for j in range(N):
-        # Create indicator variables for each possible batch size value for position j
-        indicators = {}
-        for batch_size in range(B + 1):
-            indicators[batch_size] = model.addVar(vtype=GRB.BINARY, name=f"ind_{j}_{batch_size}")
-        
-        # Constraint: sum of indicators for position j must equal 1
-        model.addConstr(gp.quicksum(indicators[batch_size] for batch_size in range(B + 1)) == 1, 
-                    name=f"ind_sum_{j}")
-        
-        # Constraint: s[j] = sum of batch_size * indicator[j, batch_size]
-        model.addConstr(s[j] == gp.quicksum(batch_size * indicators[batch_size] for batch_size in range(B + 1)), 
-                    name=f"s_value_{j}")
-        
-        # e_j = sum_{k=1}^j f(s_k) = cumulative sum of batch runtimes
         if j == 0:
-            # e[0] = f(s[0])
-            model.addConstr(e[j] == gp.quicksum(batch_runtimes.get(batch_size,0) * indicators[batch_size] for batch_size in range(B + 1)), 
-                        name=f"e_{j}")
+            model.addConstr(
+                e[j] == 21.576762387982544 * s[j] + 14.724000781249913
+            )
         else:
-            # e[j] = e[j-1] + f(s[j])
-            model.addConstr(e[j] == e[j-1] + gp.quicksum(batch_runtimes.get(batch_size, 0) * indicators[batch_size] for batch_size in range(B + 1)), 
-                        name=f"e_{j}")
+            model.addConstr(
+                e[j]
+                == e[j - 1]
+                + (21.576762387982544 * s[j] + 14.724000781249913),
+                name=f"e_{j}",
+            )
 
     # Constraint 5: t_i = sum_j x_{i,j} e_j, forall i (if scheduled), otherwise t_i = large_value
     for i in range(N):
