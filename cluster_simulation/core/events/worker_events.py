@@ -53,6 +53,13 @@ class TaskArrival(Event):
 
         if gcfg.SLO_TYPE == "NEXUS":
             self.task.deadline = current_time + self.task.slo
+
+        if gcfg.DROP_POLICY == "WORKER_ADMISSION_LIMIT":
+            avg_qlen = self.worker.get_avg_model_queue_len(
+                current_time, 
+                self.task.model_data.id,
+                info_staleness=0)
+            
         
         if gcfg.AUTOSCALING_POLICY != "NONE" and (self.worker.id not in self.simulation.workers or \
             (self.task.model_data != None and \
@@ -155,6 +162,7 @@ class BatchArrivalAtWorker(Event):
                 BatchRejectionAtWorker(self.simulation,
                                        self.worker,
                                        self.batch,
+                                       self.instance_id,
                                        current_worker_batch=curr_batch))]
 
         for task in self.batch.tasks:
