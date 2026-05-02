@@ -12,6 +12,7 @@ from client.client import Client
 from network.network import Network
 from schedulers.shepherd_scheduler import ShepherdScheduler
 from schedulers.central_round_robin_scheduler import CentralRoundRobinScheduler
+from schedulers.decentral_round_robin_scheduler import DecentralRoundRobinScheduler
 from workers.worker import Worker
 
 from core.allocation import ModelAllocation
@@ -34,6 +35,7 @@ class Simulation:
     def __init__(self, centralized: bool, out_path: str):
         self.out_path = out_path
         self.em = EventManager()
+        self.is_centralized = centralized
 
         self.models = self._generate_models()
         self.workflows = self._generate_workflows()
@@ -43,6 +45,7 @@ class Simulation:
         self.workers = self._generate_workers()
 
         self.scheduler = None
+        scheduler_worker_id = None
         if centralized:
             scheduler_worker_id = list(self.workers.keys())[0]
 
@@ -53,13 +56,26 @@ class Simulation:
             elif gcfg.DISPATCH_POLICY == "ROUND_ROBIN":
                 self.scheduler = CentralRoundRobinScheduler(
                     self.em, self.workers, self.workflows, scheduler_worker_id)
+                
+            else:
+                assert("Unknown central dispatch policy")
+
+        else:
+            if gcfg.DISPATCH_POLICY == "ROUND_ROBIN":
+                self.scheduler = DecentralRoundRobinScheduler(
+                    self.em, self.workers, self.workflows)
+                
+            else:
+                assert("Unknown decentral dispatch policy")
+
 
         self.network = Network(self.em, scheduler_worker_id)
         self.verifier = LiveVerifier(self.em, 
                                      {c.id: c for c in self.clients}, 
                                      self.workers,
-                                     scheduler_worker_id)
-        self.logger = Logger(self.em)
+                                     scheduler_worker_id,
+                                     centralized)
+        self.logger = Logger(self.em, self.workers)
 
 
     def _generate_clients(self) -> list[Client]:
@@ -165,7 +181,7 @@ class Simulation:
         workers = {}
         for (wid, _) in self.allocation.worker_ids_by_create_time:
             cfg = self.allocation.worker_cfgs[wid]
-            worker = Worker(wid, self.em, cfg[0], 0)
+            worker = Worker(wid, self.em, cfg[0], 0, self.is_centralized)
             workers[wid] = worker
             for mid in cfg[1]:
                 self.models[mid].max_batch_size = self.allocation.models[mid].max_batch_size

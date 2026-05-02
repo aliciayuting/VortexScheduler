@@ -24,12 +24,13 @@ from scipy.stats import norm
 class LiveVerifier(EventListener):
 
     def __init__(self, em: EventManager, clients: dict[UUID, Client], workers: dict[UUID, Worker],
-                 scheduler_worker_id: UUID):
+                 scheduler_worker_id: UUID, is_centralized: bool):
         
         super().__init__(Agent.VERIFIER)
 
         self.verify_worker_configs(workers)
 
+        self.is_centralized = is_centralized
         self.scheduler_worker_id = scheduler_worker_id
         self.clients = clients
         self.workers = workers
@@ -252,13 +253,18 @@ class LiveVerifier(EventListener):
                     expected_arrival_time = CPU_to_CPU_delay(sum([t.result_size for t in tasks]))
                 elif event.kwargs["to_worker_id"] != event.kwargs["from_worker_id"]:
                     if event.type.id == EventIds.TASKS_INPUTS_SENT_TO_WORKER:
-                        expected_arrival_time = CPU_to_CPU_delay(sum([t.input_size for t in tasks]))
+                        if self.is_centralized:
+                            # sched -> worker no cost if decentral
+                            expected_arrival_time = CPU_to_CPU_delay(sum([t.input_size for t in tasks]))
                     else:
                         expected_arrival_time = CPU_to_CPU_delay(sum([t.result_size for t in tasks]))
             
             for task in tasks:
-                self.task_send_queue[(task.job.id, task.task_id)] = \
-                    (event.time + expected_arrival_time, expected_worker_id)
+                if (task.job.id, task.task_id) not in self.task_send_queue:
+                    self.task_send_queue[(task.job.id, task.task_id)] = []
+                
+                self.task_send_queue[(task.job.id, task.task_id)].append(
+                    (event.time + expected_arrival_time, expected_worker_id))
                 
         elif event.type.id in [EventIds.JOB_ARRIVAL_AT_SCHEDULER, 
                                EventIds.TASKS_INPUTS_ARRIVAL_AT_WORKER, 
@@ -277,12 +283,12 @@ class LiveVerifier(EventListener):
                 receiving_worker_id = event.kwargs["to_worker_id"]
 
             for task in tasks:
-                assert((task.job.id, task.task_id) in self.task_send_queue)
-                assert(self.task_send_queue[(task.job.id, task.task_id)] == \
-                       (event.time, receiving_worker_id))
-                self.task_send_queue.pop((task.job.id, task.task_id))
+                assert((task.job.id, task.task_id) in self.task_send_queue and \
+                       len(self.task_send_queue[(task.job.id, task.task_id)]) > 0)
+                assert((event.time, receiving_worker_id) in self.task_send_queue[(task.job.id, task.task_id)])
+                self.task_send_queue[(task.job.id, task.task_id)].remove((event.time, receiving_worker_id))
 
 
     def verify_on_sim_end(self):
-        assert(len(self.task_send_queue.keys()) == 0)
+        assert(sum(len(v) for v in self.task_send_queue.values()) == 0)
         assert(len(self.task_exec_queue.keys()) == 0)

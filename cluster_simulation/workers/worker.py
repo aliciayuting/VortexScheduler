@@ -21,11 +21,13 @@ class Worker(EventListener):
 
     _abandoned_batches = []
 
-    def __init__(self, id: UUID, em: EventManager, total_memory_gb: int, create_time: float):
+    def __init__(self, id: UUID, em: EventManager, total_memory_gb: int, create_time: float,
+                 is_centralized: bool):
         super().__init__(Agent.WORKER)
 
         self.id = id
         self.em = em
+        self.is_centralized = is_centralized
         self.total_memory_gb = total_memory_gb
         self.create_time = create_time
         self.GPU_state = GPUState(total_memory_gb * (10**6))
@@ -237,7 +239,7 @@ class Worker(EventListener):
             task.job.set_completion_time(time, task.task_id)
             self.completed_tasks[(task.job.id, task.task_id)] = task
 
-            # if scheduler directed worker to send results, add to send batch
+            # if central scheduler directed worker to send results, add to send batch
             if (task.job.id, task.task_id) in self.scheduled_task_to_worker:
                 next_worker_id = self.scheduled_task_to_worker[(task.job.id, task.task_id)]
                 if next_worker_id not in tasks_to_send: tasks_to_send[next_worker_id] = []
@@ -254,7 +256,7 @@ class Worker(EventListener):
                                   "worker_id": self.id}),
                     self.emitter_id)
         
-        # send outputs if required by prior scheduling decision
+        # send outputs if required
         for worker_id, send_batch in tasks_to_send.items():
             self.em.add_event(
                 Event(time,
@@ -265,14 +267,15 @@ class Worker(EventListener):
                             "ignore_transfer_time": not gcfg.ENABLE_NETWORKING_DELAYS}),
                 self.emitter_id)
 
-        # notify scheduler of newly available tasks, but keep outputs on current worker
-        all_available = [nt for task in batch.tasks for nt in task.job.newly_available_tasks(task)]
-        if all_available:
-            self.em.add_event(
-                Event(time, 
-                      EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
-                      kwargs={"tasks": all_available}), 
-                self.emitter_id)
+        # notify centralized scheduler of newly available tasks, but keep outputs on current worker
+        if self.is_centralized:
+            all_available = [nt for task in batch.tasks for nt in task.job.newly_available_tasks(task)]
+            if all_available:
+                self.em.add_event(
+                    Event(time, 
+                        EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
+                        kwargs={"tasks": all_available}), 
+                    self.emitter_id)
             
         # if worker queue is not empty, start a new batch
         instance_state = self.GPU_state.get_instance_state(instance_id, time)

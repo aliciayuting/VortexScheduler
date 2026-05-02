@@ -7,7 +7,7 @@ from uuid import UUID
 
 class Network(EventListener):
 
-    def __init__(self, em: EventManager, scheduler_worker_id: UUID):
+    def __init__(self, em: EventManager, scheduler_worker_id: UUID | None):
         super().__init__(Agent.NETWORK)
 
         self.scheduler_worker_id = scheduler_worker_id

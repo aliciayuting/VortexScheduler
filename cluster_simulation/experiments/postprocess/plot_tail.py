@@ -13,6 +13,9 @@ WORKFLOW_TYPE_TO_EXEC_TIME = {
     6: 62.5,
     7: 70.5,
     8: 80.5,
+    1: 256.3,
+    4: 787.2,
+    5: 388.7
 }
 
 def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: bool,
