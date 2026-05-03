@@ -32,14 +32,15 @@ class EventIds:
     Execution markers.
     """
     JOBS_DROPPED                        = 10
-    BATCH_STARTED_AT_WORKER             = 11
-    BATCH_FINISHED_AT_WORKER            = 12
+    CHECK_QUEUE_AT_WORKER               = 11
+    BATCH_STARTED_AT_WORKER             = 12
+    BATCH_FINISHED_AT_WORKER            = 13
 
     """
     Events notifying client of job status.
     """
-    RESPONSE_SENT_TO_CLIENT             = 13
-    RESPONSE_RECEIVED_AT_CLIENT         = 14
+    RESPONSE_SENT_TO_CLIENT             = 14
+    RESPONSE_RECEIVED_AT_CLIENT         = 15
 
 
 EVENT_TYPES: dict[int, EventType] = {
@@ -125,6 +126,12 @@ EVENT_TYPES: dict[int, EventType] = {
         kwargs={"job_ids": True},
         emitter_types=[Agent.SCHEDULER, Agent.WORKER],
         listener_types=[Agent.SCHEDULER, Agent.WORKER, Agent.CLIENT, Agent.LOGGER, Agent.VERIFIER]),
+
+    EventIds.CHECK_QUEUE_AT_WORKER: EventType(
+        EventIds.CHECK_QUEUE_AT_WORKER, "Check Queue for Execution at Worker",
+        kwargs={"model_id": True, "worker_id": True},
+        emitter_types=[Agent.WORKER],
+        listener_types=[Agent.WORKER, Agent.LOGGER, Agent.VERIFIER]),
     
     EventIds.BATCH_STARTED_AT_WORKER: EventType(
         EventIds.BATCH_STARTED_AT_WORKER, "Batch Started at Worker",
@@ -132,7 +139,7 @@ EVENT_TYPES: dict[int, EventType] = {
                 "model_instance_id": True, 
                 "worker_id": True},
         emitter_types=[Agent.WORKER],
-        listener_types=[Agent.SCHEDULER, Agent.LOGGER, Agent.VERIFIER]),
+        listener_types=[Agent.SCHEDULER, Agent.WORKER, Agent.LOGGER, Agent.VERIFIER]),
     
     EventIds.BATCH_FINISHED_AT_WORKER: EventType(
         EventIds.BATCH_FINISHED_AT_WORKER, "Batch Finished at Worker",

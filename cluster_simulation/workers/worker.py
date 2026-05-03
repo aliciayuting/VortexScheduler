@@ -37,6 +37,8 @@ class Worker(EventListener):
             EVENT_TYPES[EventIds.TASKS_INPUTS_ARRIVAL_AT_WORKER],
             EVENT_TYPES[EventIds.TASKS_OUTPUTS_ASSIGNED_TO_WORKER],
             EVENT_TYPES[EventIds.TASKS_OUTPUTS_ARRIVAL_AT_WORKER],
+            EVENT_TYPES[EventIds.CHECK_QUEUE_AT_WORKER],
+            EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
             EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER],
             EVENT_TYPES[EventIds.JOBS_DROPPED],
         })
@@ -44,6 +46,7 @@ class Worker(EventListener):
         self.emitter_id = self.em.register_emitter(Agent.WORKER, {
             EVENT_TYPES[EventIds.TASKS_OUTPUTS_SENT_TO_WORKER],
             EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
+            EVENT_TYPES[EventIds.CHECK_QUEUE_AT_WORKER],
             EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
             EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER],
             EVENT_TYPES[EventIds.JOBS_DROPPED],
@@ -95,6 +98,18 @@ class Worker(EventListener):
         elif event.type.id == EventIds.JOBS_DROPPED:
             self._drop_tasks(event.kwargs["job_ids"])
 
+        elif event.type.id == EventIds.CHECK_QUEUE_AT_WORKER:
+            if event.kwargs["worker_id"] != self.id:
+                return
+            
+            self.on_check_queue(event.time, event.kwargs["model_id"])
+
+        elif event.type.id == EventIds.BATCH_STARTED_AT_WORKER:
+            if event.kwargs["worker_id"] != self.id:
+                return
+            
+            self.exec_batch(event.time, event.kwargs["batch"], event.kwargs["model_instance_id"])
+
         elif event.type.id == EventIds.BATCH_FINISHED_AT_WORKER:
             if event.kwargs["worker_id"] != self.id:
                 return
@@ -124,7 +139,14 @@ class Worker(EventListener):
         """
         state = self.GPU_state.get_instance_state(instance_id, time)
         assert(state.reserved_batch == None)
-        self.exec_batch(time, Batch(tasks), instance_id)
+
+        self.em.add_event(
+            Event(time, 
+                  EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
+                  kwargs={"batch": Batch(tasks), 
+                          "model_instance_id": instance_id, 
+                          "worker_id": self.id}),
+            self.emitter_id)
 
 
     def on_tasks_ready(self, time: float, tasks: list[Task]):
@@ -137,23 +159,13 @@ class Worker(EventListener):
                 self.queues[task.model_data.id] = PriorityQueue()
             self.queues[task.model_data.id].put(QueuedTask(task))
 
-        models_needed = [mid for mid in self.queues.keys() if self.queues[mid].qsize() > 0]
-
-        states = self.GPU_state.state_at(time)
-        for state in states:
-            # if idle copy of required model exists start batch
-            if state.model.data.id in models_needed and not state.reserved_batch:
-                batch = TaskBatcher.get_batch(time, 
-                                              self.total_memory_gb, 
-                                              self.queues[state.model.data.id],
-                                              False)
-                if not batch: continue
-                TaskBatcher.dequeue_batch(batch, self.queues[state.model.data.id])
-
-                self.exec_batch(time, batch, instance_id=state.model.id)
-                
-                if self.queues[state.model.data.id].qsize() == 0:
-                    models_needed.remove(state.model.data.id)
+        for model_id in set(t.model_data.id for t in tasks):
+            self.em.add_event(
+                Event(time, 
+                      EVENT_TYPES[EventIds.CHECK_QUEUE_AT_WORKER],
+                      kwargs={"model_id": model_id,
+                              "worker_id": self.id}),
+                self.emitter_id)
 
 
     def on_outputs_assigned(self, time: float, job_task_ids: list[tuple[int, int]], to_worker_id: UUID):
@@ -225,6 +237,31 @@ class Worker(EventListener):
                     filtered.append(task)
             
             for t in filtered: q.put(t)
+
+
+    def on_check_queue(self, time: float, model_id: int):
+        # if no tasks queued, do nothing
+        if model_id not in self.queues or self.queues[model_id].qsize() == 0:
+            return
+
+        idle_instances = [s.model.id for s in self.GPU_state.state_at(time)
+                          if (not s.reserved_batch) and (s.model.data.id == model_id)]
+        
+        while self.queues[model_id].qsize() > 0 and len(idle_instances) > 0:
+            batch = TaskBatcher.get_batch(time, 
+                                            self.total_memory_gb, 
+                                            self.queues[model_id],
+                                            True)
+            
+            if not batch: break
+
+            self.em.add_event(
+                Event(time, 
+                        EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
+                        kwargs={"batch": batch, 
+                                "model_instance_id": idle_instances.pop(0), 
+                                "worker_id": self.id}),
+                self.emitter_id)
     
 
     def on_batch_finish(self, time: float, batch: Batch, instance_id):
@@ -276,20 +313,15 @@ class Worker(EventListener):
                         EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
                         kwargs={"tasks": all_available}), 
                     self.emitter_id)
-            
-        # if worker queue is not empty, start a new batch
-        instance_state = self.GPU_state.get_instance_state(instance_id, time)
-        if instance_state.model.data.id in self.queues and \
-            self.queues[instance_state.model.data.id].qsize() > 0:
-            
-            batch = TaskBatcher.get_batch(time, 
-                                          self.total_memory_gb,
-                                          self.queues[instance_state.model.data.id],
-                                          False)
-            if not batch: return
-            TaskBatcher.dequeue_batch(batch, self.queues[instance_state.model.data.id])
-            
-            self.exec_batch(time, batch, instance_id)
+        
+        assert(self.GPU_state.does_have_idle_copy(batch.model_data.id, time))
+
+        self.em.add_event(
+            Event(time, 
+                    EVENT_TYPES[EventIds.CHECK_QUEUE_AT_WORKER],
+                    kwargs={"model_id": batch.model_data.id,
+                            "worker_id": self.id}),
+            self.emitter_id)
 
 
     def exec_batch(self, time: float, batch: Batch, instance_id=None):
@@ -330,14 +362,6 @@ class Worker(EventListener):
             SameMachineGPUtoCPU_delay(sum(t.result_size for t in batch.tasks))
         
         self.em.add_event(
-            Event(time, 
-                  EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
-                  kwargs={"batch": batch, 
-                          "model_instance_id": reserved_instance_id, 
-                          "worker_id": self.id}),
-            self.emitter_id)
-        
-        self.em.add_event(
             Event(task_end_time, 
                   EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER],
                   kwargs={"batch": batch, 
@@ -347,6 +371,9 @@ class Worker(EventListener):
         
     def did_abandon_batch(self, batch_id: int):
         return batch_id in Worker._abandoned_batches
+    
+    def get_qlen(self, model_id: int):
+        return self.queues[model_id].qsize() if model_id in self.queues else 0
 
     def __hash__(self):
         return hash(self.id)
