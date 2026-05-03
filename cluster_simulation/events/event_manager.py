@@ -70,6 +70,15 @@ class EventManager:
         """Enqueues event onto event queue.
         """
         assert(emitter_id in self._event_emitters[event.type.id])
+
+        for queued_event in self._event_queue.queue:
+            if queued_event.type.id == event.type.id and \
+                queued_event.time == event.time and \
+                queued_event.kwargs == event.kwargs:
+
+                print("[WARNING] Duplicate event queued, ignoring add_event")
+                return
+
         self._event_queue.put(event)
 
 
