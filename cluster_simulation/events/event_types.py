@@ -32,9 +32,9 @@ class EventIds:
     Execution markers.
     """
     JOBS_DROPPED                        = 10
-    CHECK_QUEUE_AT_WORKER               = 11
-    BATCH_STARTED_AT_WORKER             = 12
-    BATCH_FINISHED_AT_WORKER            = 13
+    BATCH_FINISHED_AT_WORKER            = 11
+    CHECK_QUEUE_AT_WORKER               = 12
+    BATCH_STARTED_AT_WORKER             = 13
 
     """
     Events notifying client of job status.

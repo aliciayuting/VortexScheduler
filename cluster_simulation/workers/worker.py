@@ -335,6 +335,10 @@ class Worker(EventListener):
 
         batch_exec_time = batch.model_data.get_randomized_exec_time(
             batch.size(), self.total_memory_gb)
+        task_end_time = time + batch_exec_time + \
+            SameMachineCPUtoGPU_delay(sum(t.input_size for t in batch.tasks)) + \
+            SameMachineGPUtoCPU_delay(sum(t.result_size for t in batch.tasks))
+        
         reserved_instance_id = None
 
         if batch.model_data != None:
@@ -342,24 +346,18 @@ class Worker(EventListener):
 
             if instance_id:
                 reserved_instance_id = instance_id
-                self.GPU_state.reserve_instance(instance_id, time, batch, batch_exec_time)
+                self.GPU_state.reserve_instance(instance_id, time, batch, task_end_time)
             else:
                 reserved_instance_id = self.GPU_state.reserve_idle_copy(
-                    batch.model_data, time, batch, batch_exec_time)
+                    batch.model_data, time, batch, task_end_time)
 
             # verify reserved instance
             reserved_state = [s for s in self.GPU_state.state_at(time)
                                 if s.model.id == reserved_instance_id][0]
-            assert(reserved_state.reserved_until >= (time + batch_exec_time))
+            assert(reserved_state.reserved_until >= (time + task_end_time))
             assert(reserved_state.reserved_batch == batch)
             assert(reserved_state.model.data.id == batch.model_data.id)
             assert(reserved_state.state == ModelState.PLACED)
-
-            batch_exec_time = reserved_state.reserved_until - time
-
-        task_end_time = time + batch_exec_time + \
-            SameMachineCPUtoGPU_delay(sum(t.input_size for t in batch.tasks)) + \
-            SameMachineGPUtoCPU_delay(sum(t.result_size for t in batch.tasks))
         
         self.em.add_event(
             Event(task_end_time, 

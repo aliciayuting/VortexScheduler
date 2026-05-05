@@ -102,6 +102,8 @@ class Logger(EventListener):
                 self.task_log.loc[mask, "executing_worker_qlen_at_arrival"] = \
                     self.workers[event.kwargs["to_worker_id"]].get_qlen(task.model_data.id)
 
+                assert(self.workers[event.kwargs["to_worker_id"]].get_qlen(task.model_data.id) > 0)
+
         elif event.type.id == EventIds.TASKS_ASSIGNED_TO_WORKER:
             tasks: list[Task] = event.kwargs["tasks"]
             for task in tasks:
@@ -116,13 +118,10 @@ class Logger(EventListener):
                         "execution_end_timestamp": np.nan, "dropped_timestamp": np.nan,
                         "curr_unfinished_jobs": len(self.unfinished_jobs), 
                         "curr_idle_instances": self._get_curr_idle_instances(event.time),
-                        "executing_worker_qlen_at_arrival": self.workers[event.kwargs["worker_id"]].get_qlen(
-                            task.model_data.id)
+                        "executing_worker_qlen_at_arrival": np.nan
                     }
                 else:
                     self.task_log.loc[mask, "executing_worker_id"] = event.kwargs["worker_id"]
-                    self.task_log.loc[mask, "executing_worker_qlen_at_arrival"] = \
-                        self.workers[event.kwargs["worker_id"]].get_qlen(task.model_data.id)
 
                 for rt in task.required_task_ids:
                     if (task.job.id, rt) not in self.deps_to_task:
@@ -133,19 +132,35 @@ class Logger(EventListener):
             tasks: list[Task] = event.kwargs["tasks"]
             for task in tasks:
                 for succ in self.deps_to_task[(task.job.id, task.task_id)]:
-                    self.task_log.loc[(self.task_log["job_id"]==task.job.id) & \
-                                      (self.task_log["task_id"]==succ.task_id), "last_dep_dispatch_timestamp"] = event.time
+                    mask = ((self.task_log["job_id"]==task.job.id) & 
+                            (self.task_log["task_id"]==succ.task_id) & 
+                            (self.task_log["executing_worker_id"]==event.kwargs["to_worker_id"]))
+
+                    if self.task_log.loc[mask].empty or \
+                        self.task_log.loc[mask].iloc[0]["executing_worker_id"] != event.kwargs["to_worker_id"]:
+                        continue
+
+                    self.task_log.loc[mask, "last_dep_dispatch_timestamp"] = event.time
         
         elif event.type.id == EventIds.TASKS_OUTPUTS_ARRIVAL_AT_WORKER:
             tasks: list[Task] = event.kwargs["tasks"]
             for task in tasks:
                 for succ in self.deps_to_task[(task.job.id, task.task_id)]:
-                    mask = (self.task_log["job_id"]==task.job.id) & (self.task_log["task_id"]==succ.task_id)
+                    mask = ((self.task_log["job_id"]==task.job.id) & 
+                            (self.task_log["task_id"]==succ.task_id) & 
+                            (self.task_log["executing_worker_id"]==event.kwargs["to_worker_id"]))
+
+                    if self.task_log.loc[mask].empty or \
+                        self.task_log.loc[mask].iloc[0]["executing_worker_id"] != event.kwargs["to_worker_id"]:
+                        
+                        continue
+
                     self.task_log.loc[mask, "executing_worker_id"] = event.kwargs["to_worker_id"]
                     self.task_log.loc[mask, "arrival_at_worker_timestamp"] = event.time
                     self.task_log.loc[mask, "executing_worker_qlen_at_arrival"] = \
                         self.workers[event.kwargs["to_worker_id"]].get_qlen(succ.model_data.id)
 
+    
         elif event.type.id == EventIds.BATCH_STARTED_AT_WORKER:
             batch: Batch = event.kwargs["batch"]
             for task in batch.tasks:

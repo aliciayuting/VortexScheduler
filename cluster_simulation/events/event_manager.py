@@ -76,8 +76,12 @@ class EventManager:
                 queued_event.time == event.time and \
                 queued_event.kwargs == event.kwargs:
 
-                print("[WARNING] Duplicate event queued, ignoring add_event")
-                return
+                if queued_event.type.id == EventIds.CHECK_QUEUE_AT_WORKER:
+                    print("[WARNING] Duplicate CHECK_QUEUE event queued, ignoring add_event")
+                    return
+
+                else:
+                    raise RuntimeError("Unexpected duplicate event: ", event)
 
         self._event_queue.put(event)
 

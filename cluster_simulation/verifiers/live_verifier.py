@@ -132,6 +132,10 @@ class LiveVerifier(EventListener):
             
             # instance is currently idle
             assert(self.instance_states[event.kwargs["model_instance_id"]] == None)
+
+            # instance is correct
+            assert(event.kwargs["model_instance_id"] in self.model_id_to_instances[batch.model_data.id])
+            assert(event.kwargs["model_instance_id"] in self.worker_id_to_instances[event.kwargs["worker_id"]])
             
             for t in batch.tasks:
                 # for all tasks, dependencies should all have been completed
