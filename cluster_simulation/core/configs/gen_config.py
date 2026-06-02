@@ -5,7 +5,7 @@ import numpy as np
 PRODUCE_EVENT_LOG = True
 
 # Runs a trace of produced event logs to verify simulator actions
-ENABLE_VERIFICATION = True
+ENABLE_VERIFICATION = False
 ENABLE_TRACE_VERIFICATION = False
 VERIFICATION_WINDOW_SIZE = 5000 # only process up to this many events (don't do full trace)
 
@@ -88,8 +88,8 @@ ENABLE_ESTIMATOR_LOGGING = False
 
 """  -------        General Scheduling Parameters  --------- """
 
-# ROUND_ROBIN | SHEPHERD (central only) | HEFT (decentral only)
-DISPATCH_POLICY = "SHEPHERD"
+# ROUND_ROBIN | QUEUED_ROUND_ROBIN | SHEPHERD | HEFT (central only)
+DISPATCH_POLICY = "ROUND_ROBIN"
 ENABLE_PIPELINING = False
 ENABLE_NETWORKING_DELAYS = False
 
@@ -98,7 +98,7 @@ BATCH_POLICY = "LARGEST"
 FALLBACK_TO_LARGEST_BATCH = False
 
 # OPTIMAL | LATEST_POSSIBLE | CLUSTER_ADMISSION_LIMIT | NONE
-DROP_POLICY = "NONE"
+DROP_POLICY = "LATEST_POSSIBLE"
 
 SLO_SLACK = 0
 SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS

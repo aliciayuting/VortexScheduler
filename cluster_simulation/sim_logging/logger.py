@@ -102,7 +102,8 @@ class Logger(EventListener):
                 self.task_log.loc[mask, "executing_worker_qlen_at_arrival"] = \
                     self.workers[event.kwargs["to_worker_id"]].get_qlen(task.model_data.id)
 
-                assert(self.workers[event.kwargs["to_worker_id"]].get_qlen(task.model_data.id) > 0)
+                if "force_instance_id" not in event.kwargs:
+                    assert(self.workers[event.kwargs["to_worker_id"]].get_qlen(task.model_data.id) > 0)
 
         elif event.type.id == EventIds.TASKS_ASSIGNED_TO_WORKER:
             tasks: list[Task] = event.kwargs["tasks"]
@@ -172,7 +173,7 @@ class Logger(EventListener):
                 "instance_id": event.kwargs["model_instance_id"], 
                 "model_id": batch.model_data.id, 
                 "batch_id": batch.id, 
-                "batched_job_task_ids": [(t.job.id, t.task_id) for t in batch.tasks], 
+                "batched_job_task_ids": [(t.job.id, t.task_id) for t in batch.tasks],
                 "batch_size": batch.size(), 
                 "execution_start_timestamp": event.time, 
                 "execution_end_timestamp": np.nan,

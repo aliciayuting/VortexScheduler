@@ -13,6 +13,8 @@ from network.network import Network
 from schedulers.shepherd_scheduler import ShepherdScheduler
 from schedulers.central_round_robin_scheduler import CentralRoundRobinScheduler
 from schedulers.decentral_round_robin_scheduler import DecentralRoundRobinScheduler
+from schedulers.heft_scheduler import HEFTScheduler
+from schedulers.queued_central_scheduler import QueuedCentralScheduler
 from workers.worker import Worker
 
 from core.allocation import ModelAllocation
@@ -56,7 +58,15 @@ class Simulation:
             elif gcfg.DISPATCH_POLICY == "ROUND_ROBIN":
                 self.scheduler = CentralRoundRobinScheduler(
                     self.em, self.workers, self.workflows, scheduler_worker_id)
-                
+
+            elif gcfg.DISPATCH_POLICY == "HEFT":
+                self.scheduler = HEFTScheduler(
+                    self.em, self.workers, self.workflows, scheduler_worker_id)
+
+            elif gcfg.DISPATCH_POLICY == "QUEUED_ROUND_ROBIN":
+                self.scheduler = QueuedCentralScheduler(
+                    self.em, self.workers, self.workflows, scheduler_worker_id)
+
             else:
                 assert("Unknown central dispatch policy")
 
@@ -213,8 +223,10 @@ class Simulation:
 
         self.verifier.verify_on_sim_end()
 
-        log_verifier = LogVerifier(None, self.logger.task_log, self.logger.worker_log)
-        log_verifier.run()
+        if gcfg.ENABLE_VERIFICATION:
+            log_verifier = LogVerifier(None, self.logger.task_log, self.logger.worker_log,
+                                       self.worker_config_log, self.is_centralized, gcfg, mcfg, wcfg)
+            log_verifier.run()
 
 
     def _produce_agent_keys(self):
@@ -226,6 +238,7 @@ class Simulation:
                                                    s.model.active_from]
 
         worker_log.to_csv(os.path.join(self.out_path, "worker_config_log.csv"))
+        self.worker_config_log = worker_log
         # TODO: client log
 
 

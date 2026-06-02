@@ -54,7 +54,13 @@ class Client(EventListener):
                     # should not have logged before
                     assert(self.jobs[job_id][1] == -1)
 
-                    self.jobs[job_id][1] = event.time
+                    self.jobs[job_id] = (
+                        self.jobs[job_id][0],
+                        event.time,
+                        self.jobs[job_id][2],
+                        self.jobs[job_id][3],
+                        self.jobs[job_id][4]
+                    )
 
         else:
             raise ValueError(f"Client received unregistered event: {event}")
