@@ -157,7 +157,7 @@ class Worker(EventListener):
         for task in tasks:
             if task.model_data.id not in self.queues:
                 self.queues[task.model_data.id] = PriorityQueue()
-            self.queues[task.model_data.id].put(QueuedTask(task))
+            self.queues[task.model_data.id].put(QueuedTask(task, time))
 
         for model_id in set(t.model_data.id for t in tasks):
             self.em.add_event(
@@ -232,11 +232,11 @@ class Worker(EventListener):
         for q in self.queues.values():
             filtered = []
             while q.qsize() > 0:
-                task: Task = q.get()
-                if task.job.id not in job_ids: 
-                    filtered.append(task)
-            
-            for t in filtered: q.put(t)
+                qt: QueuedTask = q.get()
+                if qt.task.job.id not in job_ids:
+                    filtered.append(qt)
+
+            for qt in filtered: q.put(qt)
 
 
     def on_check_queue(self, time: float, model_id: int):

@@ -58,7 +58,7 @@ class ShepherdScheduler(Scheduler):
             model_ids_to_check.add(task.model_data.id)
             if task.model_data.id not in self.queues:
                 self.queues[task.model_data.id] = PriorityQueue()
-            self.queues[task.model_data.id].put(QueuedTask(task))
+            self.queues[task.model_data.id].put(QueuedTask(task, time))
         
         all_instance_states = [(w, s) for w in self.workers.values() for s in w.GPU_state.state_at(time)]
         for model_id in model_ids_to_check:

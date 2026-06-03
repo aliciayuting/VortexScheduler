@@ -52,7 +52,7 @@ def get_job_boost_size(time: float, job: Job, boost_policy: int) -> float:
     if boost_policy == BoostPolicy.TOTAL_JOB_TIME:
         return _get_processing_time(job, set())
     elif boost_policy == BoostPolicy.REMAINING_JOB_TIME:
-        return _get_processing_time(job, set(job.completed_tasks))
+        return _get_processing_time(job, {tid for tid, t in job._task_states.items() if t != -1})
     elif boost_policy == BoostPolicy.REMAINING_TIME_TO_DEADLINE:
         assert(gcfg.SLO_TYPE == "JOB_LEVEL")
         return (job.create_time + (1 + gcfg.SLO_SLACK) * job.slo) - time

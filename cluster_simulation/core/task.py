@@ -30,7 +30,7 @@ class Task(object):
             assert(self.deadline != None)
             return self.deadline
         else:
-            return self.log.job_creation_timestamp + self.job.slo * (1 + gcfg.SLO_SLACK)
+            return self.job.create_time + self.job.slo * (1 + gcfg.SLO_SLACK)
 
     def __hash__(self):
         return hash((self.task_id, self.job.id))

@@ -24,15 +24,15 @@ MAX_NUM_MODELS_PER_NODE = 4
 """  --------       Workload Parameters    --------  """
 
 CLIENT_CONFIGS = [ # in ms
-    {6: {"SEND_RATES": [40],
+    {6: {"SEND_RATES": [32],
          "JOBS_PER_SEND_RATE": [1000], 
-         "SLO": int(62.48 * 0)}},
-    {7: {"SEND_RATES": [40],
+         "SLO": int(62.48 * 5)}},
+    {7: {"SEND_RATES": [32],
          "JOBS_PER_SEND_RATE": [1000], 
-         "SLO": int(70.48 * 0)}},
-    {8: {"SEND_RATES": [40],
+         "SLO": int(70.48 * 5)}},
+    {8: {"SEND_RATES": [32],
          "JOBS_PER_SEND_RATE": [1000], 
-         "SLO": int(80.48 * 0)}},
+         "SLO": int(80.48 * 5)}},
 
     # {1: {"NUM_JOBS": 5000,
     #      "SEND_RATES": [8],#[12],
@@ -71,8 +71,8 @@ ENABLE_PREEMPTION = True
 
 BOOST_PARAMETER = 0.00293596042 # 0.00104567474
 
-# JOB_SIZE | REMAINING_JOB_TIME | FCFS | EDF
-BOOST_POLICY = "FCFS"
+# FCFS | EDF | LAXITY | JOB_SIZE | REMAINING_JOB_TIME
+BOOST_POLICY = "REMAINING_JOB_TIME"
 
 """ -------         Inferline Parameters  -------- """
 
@@ -89,7 +89,7 @@ ENABLE_ESTIMATOR_LOGGING = False
 """  -------        General Scheduling Parameters  --------- """
 
 # ROUND_ROBIN | QUEUED_ROUND_ROBIN | SHEPHERD | HEFT (central only)
-DISPATCH_POLICY = "ROUND_ROBIN"
+DISPATCH_POLICY = "QUEUED_ROUND_ROBIN"
 ENABLE_PIPELINING = False
 ENABLE_NETWORKING_DELAYS = False
 
