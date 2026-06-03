@@ -331,7 +331,7 @@ WORKFLOW_LIST = [
          "SLO": 0}]
     },
     {"JOB_TYPE": 7,         # ID of the type of workflow (dependency graph)
-     "JOB_NAME": "textvision0",
+     "JOB_NAME": "textvision1",
      # the minimum amount of time necessary to execute the whole job
      "BEST_EXEC_TIME": 60.5,
      "TASKS": [
@@ -382,7 +382,7 @@ WORKFLOW_LIST = [
          "SLO": 0}]
     },
     {"JOB_TYPE": 8,         # ID of the type of workflow (dependency graph)
-     "JOB_NAME": "textvision0",
+     "JOB_NAME": "textvision2",
      # the minimum amount of time necessary to execute the whole job
      "BEST_EXEC_TIME": 60.5,
      "TASKS": [
@@ -431,6 +431,111 @@ WORKFLOW_LIST = [
          "MAX_EMIT_BATCH_SIZE": 0, # NOTE: should not be used
          "MAX_WAIT_TIME": 1,
          "SLO": 0}]
+    },
+
+    # workflow 1 variants with search stage moved to pipeline start
+    {"JOB_TYPE": 9,         # ID of the type of workflow (dependency graph)
+     "JOB_NAME": "textvision3",
+     # the minimum amount of time necessary to execute the whole job
+     "BEST_EXEC_TIME": 60.5,
+     "TASKS": [
+         {"MODEL_ID": 15,
+         "TASK_INDEX": 0,
+         "PREV_TASK_INDEX": [],
+         "NEXT_TASK_INDEX": [1,2],
+         "INPUT_SIZE": 30000, # kB
+         "OUTPUT_SIZE": 1000,
+         "MAX_EMIT_BATCH_SIZE": 0, # NOTE: should not be used
+         "MAX_WAIT_TIME": 1,
+         "SLO": 0},
+        {"MODEL_ID": 0,
+         "TASK_INDEX": 1,
+         "PREV_TASK_INDEX": [0],
+         "NEXT_TASK_INDEX": [3],
+         "INPUT_SIZE": 1000, # kB
+         "OUTPUT_SIZE": 20000,
+         "MAX_EMIT_BATCH_SIZE": 4,
+         "MAX_WAIT_TIME": 1,
+         "SLO": 0}, # ms
+        {"MODEL_ID": 1,
+         "TASK_INDEX": 2,
+         "PREV_TASK_INDEX": [0],
+         "NEXT_TASK_INDEX": [3],
+         "INPUT_SIZE": 10000, # kB
+         "OUTPUT_SIZE": 20000,
+         "MAX_EMIT_BATCH_SIZE": 4,
+         "MAX_WAIT_TIME": 10,
+         "SLO": 0},
+        {"MODEL_ID": 2,
+         "TASK_INDEX": 3,
+         "PREV_TASK_INDEX": [1,2],
+         "NEXT_TASK_INDEX": [4],
+         "INPUT_SIZE": 40000, # kB
+         "OUTPUT_SIZE": 20000,
+         "MAX_EMIT_BATCH_SIZE": 16,
+         "MAX_WAIT_TIME": 1,
+         "SLO": 0},
+        {"MODEL_ID": 3,
+         "TASK_INDEX": 4,
+         "PREV_TASK_INDEX": [3],
+         "NEXT_TASK_INDEX": [],
+         "INPUT_SIZE": 20000, # kB
+         "OUTPUT_SIZE": 30000,
+         "MAX_EMIT_BATCH_SIZE": 0, # NOTE: should not be used
+         "MAX_WAIT_TIME": 1,
+         "SLO": 0},]
+    },
+    {"JOB_TYPE": 10,         # ID of the type of workflow (dependency graph)
+     "JOB_NAME": "textvision4",
+     # the minimum amount of time necessary to execute the whole job
+     "BEST_EXEC_TIME": 60.5,
+     "TASKS": [
+         {"MODEL_ID": 16,
+         "TASK_INDEX": 0,
+         "PREV_TASK_INDEX": [],
+         "NEXT_TASK_INDEX": [1, 2],
+         "INPUT_SIZE": 30000, # kB
+         "OUTPUT_SIZE": 1000,
+         "MAX_EMIT_BATCH_SIZE": 0, # NOTE: should not be used
+         "MAX_WAIT_TIME": 1,
+         "SLO": 0},
+        {"MODEL_ID": 0,
+         "TASK_INDEX": 1,
+         "PREV_TASK_INDEX": [0],
+         "NEXT_TASK_INDEX": [3],
+         "INPUT_SIZE": 1000, # kB
+         "OUTPUT_SIZE": 20000,
+         "MAX_EMIT_BATCH_SIZE": 4,
+         "MAX_WAIT_TIME": 1,
+         "SLO": 0}, # ms
+        {"MODEL_ID": 1,
+         "TASK_INDEX": 2,
+         "PREV_TASK_INDEX": [0],
+         "NEXT_TASK_INDEX": [3],
+         "INPUT_SIZE": 10000, # kB
+         "OUTPUT_SIZE": 20000,
+         "MAX_EMIT_BATCH_SIZE": 4,
+         "MAX_WAIT_TIME": 10,
+         "SLO": 0},
+        {"MODEL_ID": 2,
+         "TASK_INDEX": 3,
+         "PREV_TASK_INDEX": [1,2],
+         "NEXT_TASK_INDEX": [4],
+         "INPUT_SIZE": 40000, # kB
+         "OUTPUT_SIZE": 20000,
+         "MAX_EMIT_BATCH_SIZE": 16,
+         "MAX_WAIT_TIME": 1,
+         "SLO": 0},
+        {"MODEL_ID": 3,
+         "TASK_INDEX": 4,
+         "PREV_TASK_INDEX": [3],
+         "NEXT_TASK_INDEX": [],
+         "INPUT_SIZE": 20000, # kB
+         "OUTPUT_SIZE": 30000,
+         "MAX_EMIT_BATCH_SIZE": 0, # NOTE: should not be used
+         "MAX_WAIT_TIME": 1,
+         "SLO": 0},
+        ]
     },
 ]
 
