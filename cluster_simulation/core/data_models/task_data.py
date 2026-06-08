@@ -10,14 +10,12 @@ class TaskData:
     """
 
     def __init__(self, id: int, model_data: ModelData | None, input_size: float, output_size: float,
-                 max_wait_time: float, max_emit_batch_size: int, slo: float | None):
+                 slo: float | None):
 
         self.id = id
         self.model_data = model_data
         self.input_size = input_size
         self.output_size = output_size
-        self.max_wait_time = max_wait_time
-        self.max_emit_batch_size = max_emit_batch_size
         self.slo = slo
 
         self.prev_tasks: list[TaskData] = []
@@ -47,11 +45,9 @@ class TaskData:
     def create_task(self, job) -> Task:
         task = Task(job,
                     self.id,
-                    self.model_data, 
+                    self.model_data,
                     self.input_size,
                     self.output_size,
-                    self.max_wait_time,
-                    self.max_emit_batch_size,
                     self.slo if gcfg.SLO_TYPE == "NEXUS" else 0)
         
         for prev_task in self.prev_tasks:

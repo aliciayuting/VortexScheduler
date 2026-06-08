@@ -24,40 +24,25 @@ MAX_NUM_MODELS_PER_NODE = 4
 """  --------       Workload Parameters    --------  """
 
 CLIENT_CONFIGS = [ # in ms
-    {6: {"SEND_RATES": [32],
+    {6: {"SEND_RATES": [36],
          "JOBS_PER_SEND_RATE": [1000], 
          "SLO": int(62.48 * 5)}},
-    {7: {"SEND_RATES": [32],
+    {9: {"SEND_RATES": [36],
          "JOBS_PER_SEND_RATE": [1000], 
          "SLO": int(70.48 * 5)}},
-    {8: {"SEND_RATES": [32],
+    {10: {"SEND_RATES": [36],
          "JOBS_PER_SEND_RATE": [1000], 
          "SLO": int(80.48 * 5)}},
-
-    # {1: {"NUM_JOBS": 5000,
-    #      "SEND_RATES": [8],#[12],
-    #      "SEND_RATE_CHANGE_INTERVALS": [], 
-    #      "SLO": int(256.3*2)}},
-    # {4: {"NUM_JOBS": 5000,
-    #      "SEND_RATES": [8],#[12],
-    #      "SEND_RATE_CHANGE_INTERVALS": [], 
-    #      "SLO": int(787.2*2)}},
-    # {5: {"NUM_JOBS": 5000,
-    #      "SEND_RATES": [8],#[12],
-    #      "SEND_RATE_CHANGE_INTERVALS": [], 
-    #      "SLO": int(388.7*2)}},
 ]
 
 WORKLOAD_DISTRIBUTION = "POISSON"  # CONSTANT | POISSON | GAMMA
 GAMMA_CV = 10  # Coefficient of variation for gamma distribution
-
 
 """  -------        Navigator Parameters  --------- """
 
 LOAD_INFORMATION_STALENESS = 1  # in ms
 PLACEMENT_INFORMATION_STALENESS = 1  # in ms
 RESCHEDULE_THREASHOLD = 1.5
-
 
 """  -------        Shepherd Parameters  --------- """
 
@@ -66,13 +51,12 @@ HERD_K = 1.5
 HERD_PERIODICITY = 12000    # run HERD every [HERD_PERIODICITY] ms
 ENABLE_PREEMPTION = True
 
-
 """  -------        Boost Parameters  --------- """
 
 BOOST_PARAMETER = 0.00293596042 # 0.00104567474
 
 # FCFS | EDF | LAXITY | JOB_SIZE | REMAINING_JOB_TIME
-BOOST_POLICY = "REMAINING_JOB_TIME"
+BOOST_POLICY = "FCFS"
 
 """ -------         Inferline Parameters  -------- """
 
@@ -88,8 +72,8 @@ ENABLE_ESTIMATOR_LOGGING = False
 
 """  -------        General Scheduling Parameters  --------- """
 
-# ROUND_ROBIN | QUEUED_ROUND_ROBIN | SHEPHERD | HEFT (central only)
-DISPATCH_POLICY = "QUEUED_ROUND_ROBIN"
+# ROUND_ROBIN (central or decentral) | QUEUED_ROUND_ROBIN | SHEPHERD | HEFT
+DISPATCH_POLICY = "ROUND_ROBIN"
 ENABLE_PIPELINING = False
 ENABLE_NETWORKING_DELAYS = False
 
@@ -106,10 +90,10 @@ SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS
 ENABLE_MULTITHREADING = True # allow multiple models on same partition to run at once
 
 # NONE | INFERLINE
-AUTOSCALING_POLICY = "NONE" #"INFERLINE"
+AUTOSCALING_POLICY = "NONE"
 
 # HERD | CUSTOM | INFERLINE
-ALLOCATION_STRATEGY = "CUSTOM" #"INFERLINE"
+ALLOCATION_STRATEGY = "CUSTOM"
 
 # [(partition size in GB, [model ids])]
 CUSTOM_ALLOCATION = [

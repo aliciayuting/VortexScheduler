@@ -4,9 +4,8 @@ import core.configs.gen_config as gcfg
 
 
 class Task(object):
-    def __init__(self, job, task_id: int, model_data: ModelData | None, 
+    def __init__(self, job, task_id: int, model_data: ModelData | None,
                  input_size: float, result_size: float,
-                 max_wait_time: float, max_emit_batch_size: int, 
                  slo: float | None=None):
 
         self.job = job
@@ -14,8 +13,6 @@ class Task(object):
         self.model_data = model_data
         self.input_size = input_size
         self.result_size = result_size
-        self.max_wait_time = max_wait_time
-        self.max_emit_batch_size = max_emit_batch_size
         self.slo = slo
         
         # list of Tasks (inputs) that this task requires ( list will be appended as the job generated)
