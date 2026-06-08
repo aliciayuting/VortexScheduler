@@ -4,13 +4,15 @@ import numpy as np
 
 PRODUCE_EVENT_LOG = True
 
+ENABLE_LIVE_VERIFICATION = True
+
 # Runs a trace of produced event logs to verify simulator actions
 ENABLE_VERIFICATION = False
 ENABLE_TRACE_VERIFICATION = False
 VERIFICATION_WINDOW_SIZE = 5000 # only process up to this many events (don't do full trace)
 
 # Print event details for every step of verifier trace
-ENABLE_VERIFICATION_DEBUG_LOGGING = True
+ENABLE_VERIFICATION_DEBUG_LOGGING = False
 
 """ --------      Worker Machine Parameters      -------- """
 
@@ -27,10 +29,10 @@ CLIENT_CONFIGS = [ # in ms
     {6: {"SEND_RATES": [36],
          "JOBS_PER_SEND_RATE": [1000], 
          "SLO": int(62.48 * 5)}},
-    {9: {"SEND_RATES": [36],
+    {7: {"SEND_RATES": [36],
          "JOBS_PER_SEND_RATE": [1000], 
          "SLO": int(70.48 * 5)}},
-    {10: {"SEND_RATES": [36],
+    {8: {"SEND_RATES": [36],
          "JOBS_PER_SEND_RATE": [1000], 
          "SLO": int(80.48 * 5)}},
 ]

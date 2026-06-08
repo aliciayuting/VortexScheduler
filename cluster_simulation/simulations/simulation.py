@@ -203,11 +203,12 @@ class Simulation:
         while self.em.has_events():
             self.em.process_next_event()
         
-        sampled_anomalies = self.verifier.sampled_anomalies / self.verifier.total_samples
-        if sampled_anomalies > 0.05:
-            RED_BOLD = "\033[1;31m"
-            RESET = "\033[0m"
-            print(f"{RED_BOLD}[VERIFIER WARNING] {sampled_anomalies * 100:.2f}% of batch execution time samples ({self.verifier.sampled_anomalies}/{self.verifier.total_samples}) showed significant deviation (p < 0.05) given configured mean and CV{RESET}")
+        if gcfg.ENABLE_LIVE_VERIFICATION and self.verifier.total_samples > 0:
+            sampled_anomalies = self.verifier.sampled_anomalies / self.verifier.total_samples
+            if sampled_anomalies > 0.05:
+                RED_BOLD = "\033[1;31m"
+                RESET = "\033[0m"
+                print(f"{RED_BOLD}[VERIFIER WARNING] {sampled_anomalies * 100:.2f}% of batch execution time samples ({self.verifier.sampled_anomalies}/{self.verifier.total_samples}) showed significant deviation (p < 0.05) given configured mean and CV{RESET}")
 
         self.logger.task_log.to_csv(os.path.join(self.out_path, "task_log.csv"))
         self.logger.worker_log.to_csv(os.path.join(self.out_path, "worker_batch_log.csv"))
@@ -221,7 +222,8 @@ class Simulation:
         
         self._produce_agent_keys()
 
-        self.verifier.verify_on_sim_end()
+        if gcfg.ENABLE_LIVE_VERIFICATION:
+            self.verifier.verify_on_sim_end()
 
         if gcfg.ENABLE_VERIFICATION:
             log_verifier = LogVerifier(None, self.logger.task_log, self.logger.worker_log,

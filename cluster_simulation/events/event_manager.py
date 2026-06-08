@@ -16,12 +16,17 @@ class EventManager:
 
         self._registered_listeners: dict[UUID, EventListener] = {}
 
-        # event ID -> emitter/listener IDs authorized to emit/listen for event 
+        # event ID -> emitter/listener IDs authorized to emit/listen for event
         self._event_emitters: dict[int, list[UUID]] = {}
         self._event_listeners: dict[int, list[UUID]] = {}
 
-        if gcfg.PRODUCE_EVENT_LOG:
-            self.event_log = pd.DataFrame(columns=["time", "event"])
+        # (model_id, worker_id, time) keys for pending CHECK_QUEUE events
+        self._pending_check_queue: set[tuple] = set()
+
+        # (time, type_id, str(kwargs)) keys for all other pending events
+        self._pending_events: set[tuple] = set()
+
+        self._event_log_rows: list = []
 
 
     def register_emitter(self, emitter_type: int, event_types: set[EventType]) -> UUID:
@@ -71,17 +76,17 @@ class EventManager:
         """
         assert(emitter_id in self._event_emitters[event.type.id])
 
-        for queued_event in self._event_queue.queue:
-            if queued_event.type.id == event.type.id and \
-                queued_event.time == event.time and \
-                queued_event.kwargs == event.kwargs:
-
-                if queued_event.type.id == EventIds.CHECK_QUEUE_AT_WORKER:
-                    print("[WARNING] Duplicate CHECK_QUEUE event queued, ignoring add_event")
-                    return
-
-                else:
-                    raise RuntimeError("Unexpected duplicate event: ", event)
+        if event.type.id == EventIds.CHECK_QUEUE_AT_WORKER:
+            key = (event.kwargs["model_id"], event.kwargs["worker_id"], event.time)
+            if key in self._pending_check_queue:
+                print("[WARNING] Duplicate CHECK_QUEUE event queued, ignoring add_event")
+                return
+            self._pending_check_queue.add(key)
+        else:
+            key = (event.time, event.type.id, str(event.kwargs))
+            if key in self._pending_events:
+                raise RuntimeError(f"Duplicate event detected: {event}")
+            self._pending_events.add(key)
 
         self._event_queue.put(event)
 
@@ -100,8 +105,15 @@ class EventManager:
         event: Event = self._event_queue.get()
         assert(event.time >= self._prev_time)
 
+        if event.type.id == EventIds.CHECK_QUEUE_AT_WORKER:
+            self._pending_check_queue.discard(
+                (event.kwargs["model_id"], event.kwargs["worker_id"], event.time))
+        else:
+            self._pending_events.discard(
+                (event.time, event.type.id, str(event.kwargs)))
+
         if gcfg.PRODUCE_EVENT_LOG:
-            self.event_log.loc[len(self.event_log)] = [event.time, str(event)]
+            self._event_log_rows.append([event.time, str(event)])
 
         # print("Received event: ", event)
         # print()
@@ -111,3 +123,7 @@ class EventManager:
             self._registered_listeners[listener_id].on_event(event)
 
         self._prev_time = event.time
+
+    @property
+    def event_log(self):
+        return pd.DataFrame(self._event_log_rows, columns=["time", "event"])

@@ -56,25 +56,26 @@ class LiveVerifier(EventListener):
         self.task_send_queue: dict[tuple[int, int], tuple[float, UUID]] = {} # -> (expected arrival time, worker ID)
         self.task_exec_queue: dict[tuple[int, int], tuple[float, UUID]] = {} # -> (expected exec start time, instance ID)
 
-        self.em.register_listener(self, {
-            EVENT_TYPES[EventIds.JOB_SENT_TO_SCHEDULER],
-            EVENT_TYPES[EventIds.JOB_ARRIVAL_AT_SCHEDULER],
-            EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
-            
-            EVENT_TYPES[EventIds.TASKS_ASSIGNED_TO_WORKER],
-            EVENT_TYPES[EventIds.TASKS_INPUTS_SENT_TO_WORKER],
-            EVENT_TYPES[EventIds.TASKS_INPUTS_ARRIVAL_AT_WORKER],
-            EVENT_TYPES[EventIds.TASKS_OUTPUTS_ASSIGNED_TO_WORKER],
-            EVENT_TYPES[EventIds.TASKS_OUTPUTS_SENT_TO_WORKER],
-            EVENT_TYPES[EventIds.TASKS_OUTPUTS_ARRIVAL_AT_WORKER],
+        if gcfg.ENABLE_LIVE_VERIFICATION:
+            self.em.register_listener(self, {
+                EVENT_TYPES[EventIds.JOB_SENT_TO_SCHEDULER],
+                EVENT_TYPES[EventIds.JOB_ARRIVAL_AT_SCHEDULER],
+                EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
 
-            EVENT_TYPES[EventIds.JOBS_DROPPED],
+                EVENT_TYPES[EventIds.TASKS_ASSIGNED_TO_WORKER],
+                EVENT_TYPES[EventIds.TASKS_INPUTS_SENT_TO_WORKER],
+                EVENT_TYPES[EventIds.TASKS_INPUTS_ARRIVAL_AT_WORKER],
+                EVENT_TYPES[EventIds.TASKS_OUTPUTS_ASSIGNED_TO_WORKER],
+                EVENT_TYPES[EventIds.TASKS_OUTPUTS_SENT_TO_WORKER],
+                EVENT_TYPES[EventIds.TASKS_OUTPUTS_ARRIVAL_AT_WORKER],
 
-            EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
-            EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER],
-            EVENT_TYPES[EventIds.RESPONSE_SENT_TO_CLIENT],
-            EVENT_TYPES[EventIds.RESPONSE_RECEIVED_AT_CLIENT]
-        })
+                EVENT_TYPES[EventIds.JOBS_DROPPED],
+
+                EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
+                EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER],
+                EVENT_TYPES[EventIds.RESPONSE_SENT_TO_CLIENT],
+                EVENT_TYPES[EventIds.RESPONSE_RECEIVED_AT_CLIENT]
+            })
 
         # (job ID, task ID) -> {arrival at sched, arrival at worker, exec start, exec end}
         self.task_log: dict[tuple[int, int], dict[str, int]] = {}
