@@ -4,6 +4,8 @@ import numpy as np
 
 PRODUCE_EVENT_LOG = True
 
+ENABLE_DUPLICATE_EVENT_CHECK = False
+
 ENABLE_LIVE_VERIFICATION = True
 
 # Runs a trace of produced event logs to verify simulator actions

@@ -82,7 +82,7 @@ class EventManager:
                 print("[WARNING] Duplicate CHECK_QUEUE event queued, ignoring add_event")
                 return
             self._pending_check_queue.add(key)
-        else:
+        elif gcfg.ENABLE_DUPLICATE_EVENT_CHECK:
             key = (event.time, event.type.id, str(event.kwargs))
             if key in self._pending_events:
                 raise RuntimeError(f"Duplicate event detected: {event}")
@@ -108,7 +108,7 @@ class EventManager:
         if event.type.id == EventIds.CHECK_QUEUE_AT_WORKER:
             self._pending_check_queue.discard(
                 (event.kwargs["model_id"], event.kwargs["worker_id"], event.time))
-        else:
+        elif gcfg.ENABLE_DUPLICATE_EVENT_CHECK:
             self._pending_events.discard(
                 (event.time, event.type.id, str(event.kwargs)))
 
