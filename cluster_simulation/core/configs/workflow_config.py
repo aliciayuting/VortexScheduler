@@ -333,7 +333,7 @@ WORKFLOW_LIST = [
     {"JOB_TYPE": 9,         # ID of the type of workflow (dependency graph)
      "JOB_NAME": "textvision3",
      "TASKS": [
-         {"MODEL_ID": 15,
+         {"MODEL_ID": 14,
          "TASK_INDEX": 0,
          "PREV_TASK_INDEX": [],
          "NEXT_TASK_INDEX": [1,2],
@@ -371,6 +371,45 @@ WORKFLOW_LIST = [
     },
     {"JOB_TYPE": 10,         # ID of the type of workflow (dependency graph)
      "JOB_NAME": "textvision4",
+     "TASKS": [
+         {"MODEL_ID": 15,
+         "TASK_INDEX": 0,
+         "PREV_TASK_INDEX": [],
+         "NEXT_TASK_INDEX": [1,2],
+         "INPUT_SIZE": 30000, # kB
+         "OUTPUT_SIZE": 1000,
+         "SLO": 0},
+        {"MODEL_ID": 0,
+         "TASK_INDEX": 1,
+         "PREV_TASK_INDEX": [0],
+         "NEXT_TASK_INDEX": [3],
+         "INPUT_SIZE": 1000, # kB
+         "OUTPUT_SIZE": 20000,
+         "SLO": 0}, # ms
+        {"MODEL_ID": 1,
+         "TASK_INDEX": 2,
+         "PREV_TASK_INDEX": [0],
+         "NEXT_TASK_INDEX": [3],
+         "INPUT_SIZE": 10000, # kB
+         "OUTPUT_SIZE": 20000,
+         "SLO": 0},
+        {"MODEL_ID": 2,
+         "TASK_INDEX": 3,
+         "PREV_TASK_INDEX": [1,2],
+         "NEXT_TASK_INDEX": [4],
+         "INPUT_SIZE": 40000, # kB
+         "OUTPUT_SIZE": 20000,
+         "SLO": 0},
+        {"MODEL_ID": 3,
+         "TASK_INDEX": 4,
+         "PREV_TASK_INDEX": [3],
+         "NEXT_TASK_INDEX": [],
+         "INPUT_SIZE": 20000, # kB
+         "OUTPUT_SIZE": 30000,
+         "SLO": 0},]
+    },
+    {"JOB_TYPE": 11,         # ID of the type of workflow (dependency graph)
+     "JOB_NAME": "textvision5",
      "TASKS": [
          {"MODEL_ID": 16,
          "TASK_INDEX": 0,

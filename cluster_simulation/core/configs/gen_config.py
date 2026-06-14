@@ -31,10 +31,10 @@ CLIENT_CONFIGS = [ # in ms
     {6: {"SEND_RATES": [36],
          "JOBS_PER_SEND_RATE": [1000], 
          "SLO": int(62.48 * 5)}},
-    {7: {"SEND_RATES": [36],
+    {10: {"SEND_RATES": [36],
          "JOBS_PER_SEND_RATE": [1000], 
          "SLO": int(70.48 * 5)}},
-    {8: {"SEND_RATES": [36],
+    {11: {"SEND_RATES": [36],
          "JOBS_PER_SEND_RATE": [1000], 
          "SLO": int(80.48 * 5)}},
 ]
@@ -77,7 +77,7 @@ ENABLE_ESTIMATOR_LOGGING = False
 """  -------        General Scheduling Parameters  --------- """
 
 # ROUND_ROBIN (central or decentral) | QUEUED_ROUND_ROBIN | SHEPHERD | HEFT
-DISPATCH_POLICY = "ROUND_ROBIN"
+DISPATCH_POLICY = "QUEUED_ROUND_ROBIN"
 ENABLE_PIPELINING = False
 ENABLE_NETWORKING_DELAYS = False
 
