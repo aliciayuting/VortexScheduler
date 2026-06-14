@@ -1,10 +1,8 @@
 import numpy as np
 
-""" --------      Simulation Parameters      -------- """
+""" --------      Verification Parameters      -------- """
 
 PRODUCE_EVENT_LOG = True
-
-ENABLE_DUPLICATE_EVENT_CHECK = False
 
 ENABLE_LIVE_VERIFICATION = True
 
@@ -15,6 +13,9 @@ VERIFICATION_WINDOW_SIZE = 5000 # only process up to this many events (don't do 
 
 # Print event details for every step of verifier trace
 ENABLE_VERIFICATION_DEBUG_LOGGING = False
+
+ENABLE_DUPLICATE_EVENT_CHECK = False
+ENABLE_CONSOLE_PRINT = False
 
 """ --------      Worker Machine Parameters      -------- """
 
@@ -29,13 +30,13 @@ MAX_NUM_MODELS_PER_NODE = 4
 
 CLIENT_CONFIGS = [ # in ms
     {6: {"SEND_RATES": [36],
-         "JOBS_PER_SEND_RATE": [1000], 
+         "JOBS_PER_SEND_RATE": [5000],
          "SLO": int(62.48 * 5)}},
     {10: {"SEND_RATES": [36],
-         "JOBS_PER_SEND_RATE": [1000], 
+         "JOBS_PER_SEND_RATE": [5000],
          "SLO": int(70.48 * 5)}},
     {11: {"SEND_RATES": [36],
-         "JOBS_PER_SEND_RATE": [1000], 
+         "JOBS_PER_SEND_RATE": [5000],
          "SLO": int(80.48 * 5)}},
 ]
 

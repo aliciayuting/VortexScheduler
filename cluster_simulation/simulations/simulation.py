@@ -210,6 +210,8 @@ class Simulation:
                 RESET = "\033[0m"
                 print(f"{RED_BOLD}[VERIFIER WARNING] {sampled_anomalies * 100:.2f}% of batch execution time samples ({self.verifier.sampled_anomalies}/{self.verifier.total_samples}) showed significant deviation (p < 0.05) given configured mean and CV{RESET}")
 
+        self.logger.finalize()
+
         self.logger.task_log.to_csv(os.path.join(self.out_path, "task_log.csv"))
         self.logger.worker_log.to_csv(os.path.join(self.out_path, "worker_batch_log.csv"))
 

@@ -93,12 +93,15 @@ def check_dag_order(task_log, wcfg) -> int:
     return report("DAG execution order", failures)
 
 
-def check_task_model_assignment(task_log, worker_log, wcfg) -> int:
+def check_task_model_assignment(task_log, job_log, worker_log, wcfg) -> int:
     wf_cfgs = build_wf_cfgs(wcfg)
     worker_models: dict[str, set] = (
         worker_log.groupby("worker_id")["model_id"].apply(set).to_dict())
+    dropped_jobs = set(job_log.loc[~job_log["was_completed"], "job_id"])
     failures = []
     for _, row in task_log.iterrows():
+        if int(row["job_id"]) in dropped_jobs and pd.isna(row["execution_start_timestamp"]):
+            continue
         expected = wf_cfgs[int(row["workflow_id"])][int(row["task_id"])]["MODEL_ID"]
         if int(row["model_id"]) != expected:
             failures.append(
@@ -144,13 +147,17 @@ def main():
     job_log    = pd.read_csv(os.path.join(logs_dir, "job_log.csv"))
     worker_log = pd.read_csv(os.path.join(logs_dir, "worker_config_log.csv"))
 
+    dropped = job_log[~job_log["was_completed"]]
+
     print(f"\nVerifying: {results_dir}")
-    print(f"  {len(task_log)} tasks, {len(job_log)} jobs, {len(worker_log)} worker instances\n")
+    print(f"  {len(task_log)} tasks, {len(job_log)} jobs, {len(worker_log)} worker instances")
+    print(f"  {len(dropped)} job(s) dropped" + (f": {sorted(dropped['job_id'].tolist())}" if len(dropped) else ""))
+    print()
 
     total_failures = 0
     total_failures += check_each_task_executes_once(task_log, job_log, wcfg)
     total_failures += check_dag_order(task_log, wcfg)
-    total_failures += check_task_model_assignment(task_log, worker_log, wcfg)
+    total_failures += check_task_model_assignment(task_log, job_log, worker_log, wcfg)
     total_failures += check_memory_allocation(worker_log, mcfg, gcfg)
 
     print()

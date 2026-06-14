@@ -46,7 +46,8 @@ class Client(EventListener):
                 self.jobs[event.kwargs["job"].id][4]
             )
 
-            print(f"Remaining jobs for client {self.id}: {len(self.jobs.keys()) - len([v for v in self.jobs.values() if v[2]])}")
+            if gcfg.ENABLE_CONSOLE_PRINT:
+                print(f"Remaining jobs for client {self.id}: {len(self.jobs.keys()) - len([v for v in self.jobs.values() if v[2]])}")
         
         elif event.type.id == EventIds.JOBS_DROPPED:
             for job_id in event.kwargs["job_ids"]:
