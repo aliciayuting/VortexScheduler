@@ -29,15 +29,24 @@ MAX_NUM_MODELS_PER_NODE = 4
 """  --------       Workload Parameters    --------  """
 
 CLIENT_CONFIGS = [ # in ms
-    {6: {"SEND_RATES": [36],
+#     {6: {"SEND_RATES": [36],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(62.48 * 5)}},
+#     {10: {"SEND_RATES": [36],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(70.48 * 5)}},
+#     {11: {"SEND_RATES": [36],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(80.48 * 5)}},
+    {1: {"SEND_RATES": [8],
          "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(62.48 * 5)}},
-    {10: {"SEND_RATES": [36],
+         "SLO": int(186.3 * 5)}},
+    {4: {"SEND_RATES": [8],
          "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(70.48 * 5)}},
-    {11: {"SEND_RATES": [36],
+         "SLO": int(358.6 * 5)}},
+    {5: {"SEND_RATES": [8],
          "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(80.48 * 5)}},
+         "SLO": int(326.7 * 5)}},
 ]
 
 WORKLOAD_DISTRIBUTION = "POISSON"  # CONSTANT | POISSON | GAMMA
@@ -78,7 +87,7 @@ ENABLE_ESTIMATOR_LOGGING = False
 """  -------        General Scheduling Parameters  --------- """
 
 # ROUND_ROBIN (central or decentral) | QUEUED_ROUND_ROBIN | SHEPHERD | HEFT
-DISPATCH_POLICY = "QUEUED_ROUND_ROBIN"
+DISPATCH_POLICY = "ROUND_ROBIN"
 ENABLE_PIPELINING = False
 ENABLE_NETWORKING_DELAYS = False
 
@@ -101,25 +110,24 @@ AUTOSCALING_POLICY = "NONE"
 ALLOCATION_STRATEGY = "CUSTOM"
 
 # [(partition size in GB, [model ids])]
-CUSTOM_ALLOCATION = [
-    (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
-    (6, [14]), (6, [15]), (6, [16]), (6, [])
-]
+# CUSTOM_ALLOCATION = [
+#     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
+#     (6, [14]), (6, [15]), (6, [16]), (6, [])
+# ]
 
-# 12-node mutlitenant ppl 2 (3 versions) alloc
-# [
-#  (12, [4]), (6, [5,13]), (6, [5,13]),
-#  (12, [6]), (12, [6]), 
-#  (12, [7]), (12, [7]), 
-#  (12, [7]), (12, [7]),
-#  (12, [8]), (12, [8]),
-#  (24, [9]), 
-#  (24, [9]), 
-#  (24, [9]), 
-#  (24, [9]),
-#  (24, [10]),
-#  (24, [10]),
-#  (24, [10])]
+# 10-node mutlitenant ppl 2 (3 versions) alloc
+CUSTOM_ALLOCATION = [
+ (12, [4]), (6, [5,13]), (6, [5,13]),
+ (12, [6]), (12, [6]),
+ (12, [7]), (12, [7]),
+ (12, [7]), (12, [7]),
+ (12, [8]), (12, [8]),
+ (24, [9]),
+ (24, [9]),
+ (24, [10]),
+ (24, [10]),
+ (24, [10])
+ ]
 
 # ppl1 4 node alloc:
 # [(24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2])]

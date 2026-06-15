@@ -110,8 +110,8 @@ MODELS = [
         # model id 9
         "MODEL_NAME": "lang_translation",
         "MODEL_SIZE": 2000000,             # in kB
-        "MAX_BATCH_SIZE": 1,
-        "MIG_BATCH_EXEC_TIMES": {24: {1: 549.9}},
+        "MAX_BATCH_SIZE": 2,
+        "MIG_BATCH_EXEC_TIMES": {24: {1: 183.3, 2: 274.9}},
         "EXEC_TIME_CVS": {6: 0.5, 12: 0.5, 24: 0.5}
     },
     {
