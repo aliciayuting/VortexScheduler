@@ -61,6 +61,9 @@ def get_job_boost_size(time: float, job: Job, boost_policy: int) -> float:
 def get_task_priority_by_boost(time, task: Task, boost_policy: int, boost_parameter=gcfg.BOOST_PARAMETER) -> float:
     boost_size = get_job_boost_size(time, task.job, boost_policy)
     # print(f"Task {task}, boost {boost_size}")
-    
+
+    # past deadline tasks
+    if boost_size <= 0:
+        return np.inf
     return task.get_task_deadline() - 1 / boost_parameter * np.log(
         1 / (1 - np.exp(-boost_parameter * boost_size)))

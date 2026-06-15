@@ -19,8 +19,9 @@ def _remaining_rank(task_data: TaskData) -> float:
 
 
 _BOOST_POLICY_MAP = {
-    "JOB_SIZE":           BoostPolicy.TOTAL_JOB_TIME,
-    "REMAINING_JOB_TIME": BoostPolicy.REMAINING_JOB_TIME,
+    "JOB_SIZE":                    BoostPolicy.TOTAL_JOB_TIME,
+    "REMAINING_JOB_TIME":          BoostPolicy.REMAINING_JOB_TIME,
+    "REMAINING_TIME_TO_DEADLINE":  BoostPolicy.REMAINING_TIME_TO_DEADLINE,
 }
 
 
