@@ -29,6 +29,15 @@ MAX_NUM_MODELS_PER_NODE = 4
 """  --------       Workload Parameters    --------  """
 
 CLIENT_CONFIGS = [ # in ms
+    {12: {"SEND_RATES": [48],
+          "JOBS_PER_SEND_RATE": [5000],
+          "SLO": int(24.05 * 0)}},  # fast_retrieval: flmr->encode_search_ivf->agg6
+    {13: {"SEND_RATES": [80],
+          "JOBS_PER_SEND_RATE": [5000],
+          "SLO": int(47.75 * 0)}},  # document_search: text_enc->flmr->search_2->agg7
+    {14: {"SEND_RATES": [10],
+          "JOBS_PER_SEND_RATE": [5000],
+          "SLO": int(108.25 * 0)}}, # cross_lingual_retrieval: lang_det->translate_fast->search_1->flmr
 #     {6: {"SEND_RATES": [36],
 #          "JOBS_PER_SEND_RATE": [5000],
 #          "SLO": int(62.48 * 5)}},
@@ -38,15 +47,15 @@ CLIENT_CONFIGS = [ # in ms
 #     {11: {"SEND_RATES": [36],
 #          "JOBS_PER_SEND_RATE": [5000],
 #          "SLO": int(80.48 * 5)}},
-    {1: {"SEND_RATES": [8],
-         "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(186.3 * 5)}},
-    {4: {"SEND_RATES": [8],
-         "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(358.6 * 5)}},
-    {5: {"SEND_RATES": [8],
-         "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(326.7 * 5)}},
+#     {1: {"SEND_RATES": [10],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(186.3 * 5)}},
+#     {4: {"SEND_RATES": [10],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(358.6 * 5)}},
+#     {5: {"SEND_RATES": [10],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(326.7 * 5)}},
 ]
 
 WORKLOAD_DISTRIBUTION = "POISSON"  # CONSTANT | POISSON | GAMMA
@@ -109,25 +118,40 @@ AUTOSCALING_POLICY = "NONE"
 # HERD | CUSTOM | INFERLINE
 ALLOCATION_STRATEGY = "CUSTOM"
 
-# [(partition size in GB, [model ids])]
+# flmr-shared workflows (WF12/13/14) alloc
+CUSTOM_ALLOCATION = [
+    (6, [2]),        # flmr (x1, shared by all three workflows)
+    (6, [5, 14]),    # encode_search-ivf + agg6          (WF12)
+    (6, [5]),        # encode_search-ivf (x2)            (WF12)
+    (6, [0, 12]),    # text_encoder + search_2           (WF13)
+    (6, [0]),        # text_encoder (x2)                 (WF13)
+    (6, [12]),       # search_2 (x2)                     (WF13)
+    (6, [15]),       # agg7                              (WF13)
+    (6, [11]),       # search_1 (x2)                     (WF14)
+    (24, [8, 11]),   # lang_detection + search_1 (12GB: no 6GB exec times for model 8)  (WF14)
+    (24, [17]),      # lang_translation_fast (x1, 24GB only)  (WF14)
+    (24, [17]),      # lang_translation_fast (x2)             (WF14)
+]
+
+# WF6/10/11 alloc (textvision variants)
 # CUSTOM_ALLOCATION = [
 #     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
 #     (6, [14]), (6, [15]), (6, [16]), (6, [])
 # ]
 
-# 10-node mutlitenant ppl 2 (3 versions) alloc
-CUSTOM_ALLOCATION = [
- (12, [4]), (6, [5,13]), (6, [5,13]),
- (12, [6]), (12, [6]),
- (12, [7]), (12, [7]),
- (12, [7]), (12, [7]),
- (12, [8]), (12, [8]),
- (24, [9]),
- (24, [9]),
- (24, [10]),
- (24, [10]),
- (24, [10])
- ]
+# 10-node multitenant ppl 2 (3 versions) alloc
+# CUSTOM_ALLOCATION = [
+#  (12, [4]), (6, [5,13]), (6, [5,13]),
+#  (12, [6]), (12, [6]),
+#  (12, [7]), (12, [7]),
+#  (12, [7]), (12, [7]),
+#  (12, [8]), (12, [8]),
+#  (24, [9]),
+#  (24, [9]),
+#  (24, [10]),
+#  (24, [10]),
+#  (24, [10])
+#  ]
 
 # ppl1 4 node alloc:
 # [(24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2])]

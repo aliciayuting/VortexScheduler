@@ -448,7 +448,98 @@ WORKFLOW_LIST = [
          "SLO": 0},
         ]
     },
+    # flmr-shared workflows (model 2 at beginning / middle / end)
+    {"JOB_TYPE": 12,
+     "JOB_NAME": "fast_retrieval",
+     "TASKS": [
+        {"MODEL_ID": 2,
+         "TASK_INDEX": 0,
+         "PREV_TASK_INDEX": [],
+         "NEXT_TASK_INDEX": [1],
+         "INPUT_SIZE": 500,   # kB
+         "OUTPUT_SIZE": 5000,
+         "SLO": 0},
+        {"MODEL_ID": 5,
+         "TASK_INDEX": 1,
+         "PREV_TASK_INDEX": [0],
+         "NEXT_TASK_INDEX": [2],
+         "INPUT_SIZE": 5000,  # kB
+         "OUTPUT_SIZE": 3000,
+         "SLO": 0},
+        {"MODEL_ID": 14,
+         "TASK_INDEX": 2,
+         "PREV_TASK_INDEX": [1],
+         "NEXT_TASK_INDEX": [],
+         "INPUT_SIZE": 3000,  # kB
+         "OUTPUT_SIZE": 1000,
+         "SLO": 0},
+    ]},
+    {"JOB_TYPE": 13,
+     "JOB_NAME": "document_search",
+     "TASKS": [
+        {"MODEL_ID": 0,
+         "TASK_INDEX": 0,
+         "PREV_TASK_INDEX": [],
+         "NEXT_TASK_INDEX": [1],
+         "INPUT_SIZE": 2000,  # kB
+         "OUTPUT_SIZE": 4000,
+         "SLO": 0},
+        {"MODEL_ID": 2,
+         "TASK_INDEX": 1,
+         "PREV_TASK_INDEX": [0],
+         "NEXT_TASK_INDEX": [2],
+         "INPUT_SIZE": 4000,  # kB
+         "OUTPUT_SIZE": 8000,
+         "SLO": 0},
+        {"MODEL_ID": 12,
+         "TASK_INDEX": 2,
+         "PREV_TASK_INDEX": [1],
+         "NEXT_TASK_INDEX": [3],
+         "INPUT_SIZE": 8000,  # kB
+         "OUTPUT_SIZE": 6000,
+         "SLO": 0},
+        {"MODEL_ID": 15,
+         "TASK_INDEX": 3,
+         "PREV_TASK_INDEX": [2],
+         "NEXT_TASK_INDEX": [],
+         "INPUT_SIZE": 6000,  # kB
+         "OUTPUT_SIZE": 2000,
+         "SLO": 0},
+    ]},
+    {"JOB_TYPE": 14,
+     "JOB_NAME": "cross_lingual_retrieval",
+     "TASKS": [
+        {"MODEL_ID": 8,
+         "TASK_INDEX": 0,
+         "PREV_TASK_INDEX": [],
+         "NEXT_TASK_INDEX": [1],
+         "INPUT_SIZE": 1000,  # kB
+         "OUTPUT_SIZE": 2000,
+         "SLO": 0},
+        {"MODEL_ID": 17,
+         "TASK_INDEX": 1,
+         "PREV_TASK_INDEX": [0],
+         "NEXT_TASK_INDEX": [2],
+         "INPUT_SIZE": 2000,  # kB
+         "OUTPUT_SIZE": 5000,
+         "SLO": 0},
+        {"MODEL_ID": 11,
+         "TASK_INDEX": 2,
+         "PREV_TASK_INDEX": [1],
+         "NEXT_TASK_INDEX": [3],
+         "INPUT_SIZE": 5000,  # kB
+         "OUTPUT_SIZE": 8000,
+         "SLO": 0},
+        {"MODEL_ID": 2,
+         "TASK_INDEX": 3,
+         "PREV_TASK_INDEX": [2],
+         "NEXT_TASK_INDEX": [],
+         "INPUT_SIZE": 8000,  # kB
+         "OUTPUT_SIZE": 3000,
+         "SLO": 0},
+    ]},
 ]
+
 def get_task_types(job_types: list[int]) -> list[tuple[int,int]]:
     return [(jt, t["TASK_INDEX"]) for jt in job_types for t in WORKFLOW_LIST[jt]["TASKS"]]
 def get_model_id_for_task_type(task_type: tuple[int,int]) -> int:
