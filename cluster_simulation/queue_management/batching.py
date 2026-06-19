@@ -23,6 +23,14 @@ class TaskBatcher:
         while task_queue.qsize() > 0: qt_list.append(task_queue.get())
         task_list = [qt.task for qt in qt_list]
 
+        if gcfg.DISABLE_BATCHING:
+            batch = Batch([task_list[0]]) if task_list else None
+            for qt in qt_list:
+                if batch and qt.task in batch.tasks and update_queue:
+                    continue
+                task_queue.put(qt)
+            return batch
+
         if gcfg.BATCH_POLICY == "LARGEST":
             batch = cls._get_largest_batch(task_list)
         elif gcfg.BATCH_POLICY == "LARGEST_FEASIBLE":
