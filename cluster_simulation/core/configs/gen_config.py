@@ -29,24 +29,16 @@ MAX_NUM_MODELS_PER_NODE = 4
 """  --------       Workload Parameters    --------  """
 
 CLIENT_CONFIGS = [ # in ms
-#     {12: {"SEND_RATES": [44],
-#           "JOBS_PER_SEND_RATE": [5000],
-#           "SLO": int(24.05 * 5)}},  # fast_retrieval: flmr->encode_search_ivf->agg6
-#     {13: {"SEND_RATES": [72],
-#           "JOBS_PER_SEND_RATE": [5000],
-#           "SLO": int(47.75 * 5)}},  # document_search: text_enc->flmr->search_2->agg7
-#     {14: {"SEND_RATES": [12],
-#           "JOBS_PER_SEND_RATE": [5000],
-#           "SLO": int(108.25 * 5)}}, # cross_lingual_retrieval: lang_det->translate_fast->search_1->flmr
-    {6: {"SEND_RATES": [32],
-         "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(62.48 * 5)}},
-    {10: {"SEND_RATES": [32],
-         "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(70.48 * 5)}},
-    {11: {"SEND_RATES": [32],
-         "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(80.48 * 5)}},
+#     {6: {"SEND_RATES": [32],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(62.48 * 5)}},
+#     {10: {"SEND_RATES": [32],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(70.48 * 5)}},
+#     {11: {"SEND_RATES": [32],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(80.48 * 5)}},
+
 #     {1: {"SEND_RATES": [6],
 #          "JOBS_PER_SEND_RATE": [5000],
 #          "SLO": int(186.3 * 5)}},
@@ -56,6 +48,26 @@ CLIENT_CONFIGS = [ # in ms
 #     {5: {"SEND_RATES": [6],
 #          "JOBS_PER_SEND_RATE": [5000],
 #          "SLO": int(326.7 * 5)}},
+
+#     {12: {"SEND_RATES": [44],
+#           "JOBS_PER_SEND_RATE": [5000],
+#           "SLO": int(24.05 * 5)}},
+#     {13: {"SEND_RATES": [72],
+#           "JOBS_PER_SEND_RATE": [5000],
+#           "SLO": int(47.75 * 5)}},
+#     {14: {"SEND_RATES": [12],
+#           "JOBS_PER_SEND_RATE": [5000],
+#           "SLO": int(108.25 * 5)}},
+
+    {15: {"SEND_RATES": [28],
+          "JOBS_PER_SEND_RATE": [5000],
+          "SLO": int(124.0 * 5)}},
+    {16: {"SEND_RATES": [28],
+          "JOBS_PER_SEND_RATE": [5000],
+          "SLO": int(125.56 * 5)}},
+    {17: {"SEND_RATES": [28],
+          "JOBS_PER_SEND_RATE": [5000],
+          "SLO": int(124.0 * 5)}},
 ]
 
 WORKLOAD_DISTRIBUTION = "POISSON"  # CONSTANT | POISSON | GAMMA
@@ -79,7 +91,7 @@ ENABLE_PREEMPTION = True
 BOOST_PARAMETER = 0.00293596042 # 0.00104567474
 
 # FCFS | EDF | LAXITY | JOB_SIZE | REMAINING_JOB_TIME | REMAINING_TIME_TO_DEADLINE
-BOOST_POLICY = "FCFS"
+BOOST_POLICY = "REMAINING_TIME_TO_DEADLINE"
 
 """ -------         Inferline Parameters  -------- """
 
@@ -96,7 +108,7 @@ ENABLE_ESTIMATOR_LOGGING = False
 """  -------        General Scheduling Parameters  --------- """
 
 # ROUND_ROBIN (central or decentral) | QUEUED_ROUND_ROBIN | SHEPHERD | HEFT
-DISPATCH_POLICY = "ROUND_ROBIN"
+DISPATCH_POLICY = "SHEPHERD"
 ENABLE_PIPELINING = False
 ENABLE_NETWORKING_DELAYS = False
 
@@ -119,26 +131,11 @@ AUTOSCALING_POLICY = "NONE"
 # HERD | CUSTOM | INFERLINE
 ALLOCATION_STRATEGY = "CUSTOM"
 
-# flmr-shared workflows (WF12/13/14) alloc
-# CUSTOM_ALLOCATION = [
-#     (6, [2]),        # flmr (x1, shared by all three workflows)
-#     (6, [5, 14]),    # encode_search-ivf + agg6          (WF12)
-#     (6, [5]),        # encode_search-ivf (x2)            (WF12)
-#     (6, [0, 12]),    # text_encoder + search_2           (WF13)
-#     (6, [0]),        # text_encoder (x2)                 (WF13)
-#     (6, [12]),       # search_2 (x2)                     (WF13)
-#     (6, [15]),       # agg7                              (WF13)
-#     (6, [11]),       # search_1 (x2)                     (WF14)
-#     (24, [8, 11]),   # lang_detection + search_1 (12GB: no 6GB exec times for model 8)  (WF14)
-#     (24, [17]),      # lang_translation_fast (x1, 24GB only)  (WF14)
-#     (24, [17]),      # lang_translation_fast (x2)             (WF14)
-# ]
-
 # WF6/10/11 alloc (textvision variants)
-CUSTOM_ALLOCATION = [
-    (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
-    (6, [14]), (6, [15]), (6, [16]), (6, [])
-]
+# CUSTOM_ALLOCATION = [
+#     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
+#     (6, [14]), (6, [15]), (6, [16]), (6, [])
+# ]
 
 # 10-node multitenant ppl 2 (3 versions) alloc
 # CUSTOM_ALLOCATION = [
@@ -153,6 +150,30 @@ CUSTOM_ALLOCATION = [
 #     (24, [10]),
 #     (24, [10])
 # ]
+
+# flmr-shared workflows (WF12/13/14) alloc
+# CUSTOM_ALLOCATION = [
+#     (6, [2]),
+#     (6, [5, 14]),
+#     (6, [5]),
+#     (6, [0, 12]),
+#     (6, [0]),
+#     (6, [12]),
+#     (6, [15]),
+#     (6, [11]),
+#     (24, [8, 11]),
+#     (24, [17]),
+#     (24, [17]),
+# ]
+
+# search_1-shared workflows (WF15/16/17) alloc
+CUSTOM_ALLOCATION = [
+    (12, [4]), (12, [4]),
+    (12, [4]), (12, [4]),
+    (6, [11]), (6, [11]), (6, [11]), (6, [11]),
+    (12, [6]), (12, [6]), (12, [6]),
+    (6, [5, 3]), (6, [12, 0]),
+]
 
 # ppl1 4 node alloc:
 # [(24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2])]
