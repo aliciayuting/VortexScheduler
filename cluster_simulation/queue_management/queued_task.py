@@ -22,6 +22,8 @@ _BOOST_POLICY_MAP = {
     "JOB_SIZE":                    BoostPolicy.TOTAL_JOB_TIME,
     "REMAINING_JOB_TIME":          BoostPolicy.REMAINING_JOB_TIME,
     "REMAINING_TIME_TO_DEADLINE":  BoostPolicy.REMAINING_TIME_TO_DEADLINE,
+    "LAXITY_BOOST":                BoostPolicy.LAXITY,
+    "RELATIVE_LAXITY_BOOST":       BoostPolicy.RELATIVE_LAXITY,
 }
 
 
@@ -35,7 +37,11 @@ class QueuedTask:
             self.priority = task.get_task_deadline()
         elif gcfg.BOOST_POLICY == "LAXITY":
             task_data = task.job.workflow.tasks[task.task_id]
-            self.priority = task.get_task_deadline() - _remaining_rank(task_data)
+            self.priority = task.get_task_deadline() - _remaining_rank(task_data) - time
+        elif gcfg.BOOST_POLICY == "RELATIVE_LAXITY":
+            task_data = task.job.workflow.tasks[task.task_id]
+            remaining = _remaining_rank(task_data)
+            self.priority = (task.get_task_deadline() - time - remaining) / remaining
         elif gcfg.BOOST_POLICY in _BOOST_POLICY_MAP:
             self.priority = get_task_priority_by_boost(
                 time, task, _BOOST_POLICY_MAP[gcfg.BOOST_POLICY])

@@ -29,15 +29,15 @@ MAX_NUM_MODELS_PER_NODE = 4
 """  --------       Workload Parameters    --------  """
 
 CLIENT_CONFIGS = [ # in ms
-#     {6: {"SEND_RATES": [32],
-#          "JOBS_PER_SEND_RATE": [5000],
-#          "SLO": int(62.48 * 5)}},
-#     {10: {"SEND_RATES": [32],
-#          "JOBS_PER_SEND_RATE": [5000],
-#          "SLO": int(70.48 * 5)}},
-#     {11: {"SEND_RATES": [32],
-#          "JOBS_PER_SEND_RATE": [5000],
-#          "SLO": int(80.48 * 5)}},
+    {6: {"SEND_RATES": [32],
+         "JOBS_PER_SEND_RATE": [5000],
+         "SLO": int(62.48 * 5)}},
+    {10: {"SEND_RATES": [32],
+         "JOBS_PER_SEND_RATE": [5000],
+         "SLO": int(70.48 * 5)}},
+    {11: {"SEND_RATES": [32],
+         "JOBS_PER_SEND_RATE": [5000],
+         "SLO": int(80.48 * 5)}},
 
 #     {1: {"SEND_RATES": [6],
 #          "JOBS_PER_SEND_RATE": [5000],
@@ -49,25 +49,25 @@ CLIENT_CONFIGS = [ # in ms
 #          "JOBS_PER_SEND_RATE": [5000],
 #          "SLO": int(326.7 * 5)}},
 
-#     {12: {"SEND_RATES": [44],
-#           "JOBS_PER_SEND_RATE": [5000],
-#           "SLO": int(24.05 * 5)}},
-#     {13: {"SEND_RATES": [72],
-#           "JOBS_PER_SEND_RATE": [5000],
-#           "SLO": int(47.75 * 5)}},
-#     {14: {"SEND_RATES": [12],
-#           "JOBS_PER_SEND_RATE": [5000],
-#           "SLO": int(108.25 * 5)}},
+    # {12: {"SEND_RATES": [44],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(24.05 * 5)}},
+    # {13: {"SEND_RATES": [72],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(47.75 * 5)}},
+    # {14: {"SEND_RATES": [12],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(108.25 * 5)}},
 
-    {15: {"SEND_RATES": [28],
-          "JOBS_PER_SEND_RATE": [5000],
-          "SLO": int(124.0 * 5)}},
-    {16: {"SEND_RATES": [28],
-          "JOBS_PER_SEND_RATE": [5000],
-          "SLO": int(125.56 * 5)}},
-    {17: {"SEND_RATES": [28],
-          "JOBS_PER_SEND_RATE": [5000],
-          "SLO": int(124.0 * 5)}},
+    # {15: {"SEND_RATES": [28],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(124.0 * 5)}},
+    # {16: {"SEND_RATES": [28],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(125.56 * 5)}},
+    # {17: {"SEND_RATES": [28],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(124.0 * 5)}},
 ]
 
 WORKLOAD_DISTRIBUTION = "POISSON"  # CONSTANT | POISSON | GAMMA
@@ -88,10 +88,11 @@ ENABLE_PREEMPTION = True
 
 """  -------        Boost Parameters  --------- """
 
-BOOST_PARAMETER = 0.00293596042 # 0.00104567474
+BOOST_PARAMETER = 0.007 # 0.00293596042
 
-# FCFS | EDF | LAXITY | JOB_SIZE | REMAINING_JOB_TIME | REMAINING_TIME_TO_DEADLINE
-BOOST_POLICY = "FCFS"
+# FCFS | EDF | LAXITY | RELATIVE_LAXITY
+# JOB_SIZE | REMAINING_JOB_TIME | REMAINING_TIME_TO_DEADLINE | LAXITY_BOOST | RELATIVE_LAXITY_BOOST
+BOOST_POLICY = "RELATIVE_LAXITY"
 
 """ -------         Inferline Parameters  -------- """
 
@@ -108,7 +109,7 @@ ENABLE_ESTIMATOR_LOGGING = False
 """  -------        General Scheduling Parameters  --------- """
 
 # ROUND_ROBIN (central or decentral) | QUEUED_ROUND_ROBIN | SHEPHERD | HEFT
-DISPATCH_POLICY = "ROUND_ROBIN"
+DISPATCH_POLICY = "QUEUED_ROUND_ROBIN"
 ENABLE_PIPELINING = False
 ENABLE_NETWORKING_DELAYS = False
 
@@ -132,10 +133,10 @@ AUTOSCALING_POLICY = "NONE"
 ALLOCATION_STRATEGY = "CUSTOM"
 
 # WF6/10/11 alloc (textvision variants)
-# CUSTOM_ALLOCATION = [
-#     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
-#     (6, [14]), (6, [15]), (6, [16]), (6, [])
-# ]
+CUSTOM_ALLOCATION = [
+    (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
+    (6, [14]), (6, [15]), (6, [16]), (6, [])
+]
 
 # 10-node multitenant ppl 2 (3 versions) alloc
 # CUSTOM_ALLOCATION = [
@@ -167,13 +168,13 @@ ALLOCATION_STRATEGY = "CUSTOM"
 # ]
 
 # search_1-shared workflows (WF15/16/17) alloc
-CUSTOM_ALLOCATION = [
-    (12, [4]), (12, [4]),
-    (12, [4]), (12, [4]),
-    (6, [11]), (6, [11]), (6, [11]), (6, [11]),
-    (12, [6]), (12, [6]), (12, [6]),
-    (6, [5, 3]), (6, [12, 0]),
-]
+# CUSTOM_ALLOCATION = [
+#     (12, [4]), (12, [4]),
+#     (12, [4]), (12, [4]),
+#     (6, [11]), (6, [11]), (6, [11]), (6, [11]),
+#     (12, [6]), (12, [6]), (12, [6]),
+#     (6, [5, 3]), (6, [12, 0]),
+# ]
 
 # ppl1 4 node alloc:
 # [(24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2])]
