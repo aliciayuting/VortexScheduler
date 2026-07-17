@@ -7,7 +7,7 @@ from core.job import Job
 
 class BoostPolicy:
     TOTAL_JOB_TIME = 0
-    REMAINING_JOB_TIME = 1
+    REMAINING_EXEC_TIME = 1
     REMAINING_TIME_TO_DEADLINE = 2
     LAXITY = 3
     RELATIVE_LAXITY = 4
@@ -48,14 +48,14 @@ def get_job_boost_size(time: float, job: Job, boost_policy: int) -> float:
     Compute a boost for the job based on the [boost_policy].
     """
     assert(boost_policy in [BoostPolicy.TOTAL_JOB_TIME,
-                            BoostPolicy.REMAINING_JOB_TIME,
+                            BoostPolicy.REMAINING_EXEC_TIME,
                             BoostPolicy.REMAINING_TIME_TO_DEADLINE,
                             BoostPolicy.LAXITY,
                             BoostPolicy.RELATIVE_LAXITY])
 
     if boost_policy == BoostPolicy.TOTAL_JOB_TIME:
         return _get_processing_time(job, set())
-    elif boost_policy == BoostPolicy.REMAINING_JOB_TIME:
+    elif boost_policy == BoostPolicy.REMAINING_EXEC_TIME:
         complete = {tid for tid, t in job._task_states.items() if t != -1}
         return _get_processing_time(job, complete)
     elif boost_policy == BoostPolicy.REMAINING_TIME_TO_DEADLINE:
