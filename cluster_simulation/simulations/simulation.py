@@ -13,8 +13,6 @@ from network.network import Network
 from schedulers.shepherd_scheduler import ShepherdScheduler
 from schedulers.central_round_robin_scheduler import CentralRoundRobinScheduler
 from schedulers.decentral_round_robin_scheduler import DecentralRoundRobinScheduler
-from schedulers.heft_scheduler import HEFTScheduler
-from schedulers.queued_central_scheduler import QueuedCentralScheduler
 from workers.worker import Worker
 
 from core.allocation import ModelAllocation
@@ -57,14 +55,6 @@ class Simulation:
             
             elif gcfg.DISPATCH_POLICY == "ROUND_ROBIN":
                 self.scheduler = CentralRoundRobinScheduler(
-                    self.em, self.workers, self.workflows, scheduler_worker_id)
-
-            elif gcfg.DISPATCH_POLICY == "HEFT":
-                self.scheduler = HEFTScheduler(
-                    self.em, self.workers, self.workflows, scheduler_worker_id)
-
-            elif gcfg.DISPATCH_POLICY == "QUEUED_ROUND_ROBIN":
-                self.scheduler = QueuedCentralScheduler(
                     self.em, self.workers, self.workflows, scheduler_worker_id)
 
             else:
