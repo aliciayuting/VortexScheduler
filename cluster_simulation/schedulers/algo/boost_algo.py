@@ -7,8 +7,10 @@ from core.job import Job
 
 class BoostPolicy:
     TOTAL_JOB_TIME = 0
-    REMAINING_JOB_TIME = 1
+    REMAINING_EXEC_TIME = 1
     REMAINING_TIME_TO_DEADLINE = 2
+    LAXITY = 3
+    RELATIVE_LAXITY = 4
 
 
 def _get_processing_time(job: Job, complete_task_ids: set[int]) -> float:
@@ -45,22 +47,37 @@ def get_job_boost_size(time: float, job: Job, boost_policy: int) -> float:
     """
     Compute a boost for the job based on the [boost_policy].
     """
-    assert(boost_policy in [BoostPolicy.TOTAL_JOB_TIME, 
-                            BoostPolicy.REMAINING_JOB_TIME,
-                            BoostPolicy.REMAINING_TIME_TO_DEADLINE])
+    assert(boost_policy in [BoostPolicy.TOTAL_JOB_TIME,
+                            BoostPolicy.REMAINING_EXEC_TIME,
+                            BoostPolicy.REMAINING_TIME_TO_DEADLINE,
+                            BoostPolicy.LAXITY,
+                            BoostPolicy.RELATIVE_LAXITY])
 
     if boost_policy == BoostPolicy.TOTAL_JOB_TIME:
         return _get_processing_time(job, set())
-    elif boost_policy == BoostPolicy.REMAINING_JOB_TIME:
-        return _get_processing_time(job, set(job.completed_tasks))
+    elif boost_policy == BoostPolicy.REMAINING_EXEC_TIME:
+        complete = {tid for tid, t in job._task_states.items() if t != -1}
+        return _get_processing_time(job, complete)
     elif boost_policy == BoostPolicy.REMAINING_TIME_TO_DEADLINE:
         assert(gcfg.SLO_TYPE == "JOB_LEVEL")
         return (job.create_time + (1 + gcfg.SLO_SLACK) * job.slo) - time
+    elif boost_policy == BoostPolicy.LAXITY:
+        complete = {tid for tid, t in job._task_states.items() if t != -1}
+        deadline = job.create_time + (1 + gcfg.SLO_SLACK) * job.slo
+        return deadline - time - _get_processing_time(job, complete)
+    elif boost_policy == BoostPolicy.RELATIVE_LAXITY:
+        complete = {tid for tid, t in job._task_states.items() if t != -1}
+        remaining = _get_processing_time(job, complete)
+        deadline = job.create_time + (1 + gcfg.SLO_SLACK) * job.slo
+        return (deadline - time - remaining) / remaining
 
 
 def get_task_priority_by_boost(time, task: Task, boost_policy: int, boost_parameter=gcfg.BOOST_PARAMETER) -> float:
     boost_size = get_job_boost_size(time, task.job, boost_policy)
     # print(f"Task {task}, boost {boost_size}")
-    
+
+    # past deadline tasks
+    if boost_size <= 0:
+        return np.inf
     return task.get_task_deadline() - 1 / boost_parameter * np.log(
         1 / (1 - np.exp(-boost_parameter * boost_size)))

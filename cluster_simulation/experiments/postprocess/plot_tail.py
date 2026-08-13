@@ -13,6 +13,9 @@ WORKFLOW_TYPE_TO_EXEC_TIME = {
     6: 62.5,
     7: 70.5,
     8: 80.5,
+    1: 256.3,
+    4: 787.2,
+    5: 388.7
 }
 
 def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: bool,
@@ -24,16 +27,22 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
 
     # Load and preprocess all sources once
     for dir, name in srcs:
-        data = pd.read_csv(os.path.join(dir, "job_breakdown.csv"))
+        data = None
+        if os.path.exists(os.path.join(dir, "job_breakdown.csv")):
+            data = pd.read_csv(os.path.join(dir, "job_breakdown.csv"))
+            data = data.rename(columns={"workflow_type": "workflow_id"})
 
-        drop_path = os.path.join(dir, "drop_log.csv")
-        if os.path.exists(drop_path):
-            for _, dropped_row in pd.read_csv(drop_path).iterrows():
-                data.loc[len(data)] = {
-                    "workflow_type": dropped_row["workflow_id"],
-                    "job_create_time": dropped_row["create_time"],
-                    "response_time": np.inf
-                }
+            drop_path = os.path.join(dir, "drop_log.csv")
+            if os.path.exists(drop_path):
+                for _, dropped_row in pd.read_csv(drop_path).iterrows():
+                    data.loc[len(data)] = {
+                        "workflow_id": dropped_row["workflow_id"],
+                        "job_create_time": dropped_row["create_time"],
+                        "response_time": np.inf
+                    }
+        else:
+            data = pd.read_csv(os.path.join(dir, "job_log.csv"))
+            data.loc[data["was_completed"]==False, "response_time"] = np.inf
 
         finite_max = data.loc[np.isfinite(data["response_time"]), "response_time"]
         if len(finite_max) > 0:
@@ -46,7 +55,7 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
     if split_by_workflow:
         # collect all workflows across all loaded dataframes
         all_workflows = sorted(set().union(*[
-            set(data["workflow_type"]) for name, data in loaded_srcs
+            set(data["workflow_id"]) for name, data in loaded_srcs
         ]))
         n = len(all_workflows)
 
@@ -63,12 +72,12 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
             ax.grid(True, which="both")
 
         for i, (name, data) in enumerate(loaded_srcs):
-            workflows = sorted(set(data["workflow_type"]))
+            workflows = sorted(set(data["workflow_id"]))
 
             for wf in workflows:
                 ax = wf2ax[wf]
 
-                subset = data.loc[data["workflow_type"] == wf, "response_time"].values
+                subset = data.loc[data["workflow_id"] == wf, "response_time"].values
                 cdf = np.array([(subset > t).mean() for t in thresholds])
                 cdf[cdf == 0] = np.nan
 
@@ -117,16 +126,22 @@ def plot_slo_as_job_size_vs_tail_cdf(srcs: list[tuple[str, str]], save_fig: bool
 
     # Load and preprocess all sources once
     for dir, name in srcs:
-        data = pd.read_csv(os.path.join(dir, "job_breakdown.csv"))
+        data = None
+        if os.path.exists(os.path.join(dir, "job_breakdown.csv")):
+            data = pd.read_csv(os.path.join(dir, "job_breakdown.csv"))
+            data = data.rename(columns={"workflow_type": "workflow_id"})
 
-        drop_path = os.path.join(dir, "drop_log.csv")
-        if os.path.exists(drop_path):
-            for _, dropped_row in pd.read_csv(drop_path).iterrows():
-                data.loc[len(data)] = {
-                    "workflow_type": dropped_row["workflow_id"],
-                    "job_create_time": dropped_row["create_time"],
-                    "response_time": np.inf
-                }
+            drop_path = os.path.join(dir, "drop_log.csv")
+            if os.path.exists(drop_path):
+                for _, dropped_row in pd.read_csv(drop_path).iterrows():
+                    data.loc[len(data)] = {
+                        "workflow_id": dropped_row["workflow_id"],
+                        "job_create_time": dropped_row["create_time"],
+                        "response_time": np.inf
+                    }
+        else:
+            data = pd.read_csv(os.path.join(dir, "job_log.csv"))
+            data.loc[data["was_completed"]==False, "response_time"] = np.inf
 
         finite_max = data.loc[np.isfinite(data["response_time"]), "response_time"]
         if len(finite_max) > 0:
@@ -137,9 +152,9 @@ def plot_slo_as_job_size_vs_tail_cdf(srcs: list[tuple[str, str]], save_fig: bool
     thresholds = np.linspace(0, 8, 200)
     for i, (name, data) in enumerate(loaded_srcs):
         cts = None
-        workflows = sorted(set(data['workflow_type']))
+        workflows = sorted(set(data['workflow_id']))
         for wf in workflows:
-            subset = data.loc[data['workflow_type'] == wf, 'response_time'].values
+            subset = data.loc[data['workflow_id'] == wf, 'response_time'].values
             if cts is None:
                 cts = np.array([(subset > t * WORKFLOW_TYPE_TO_EXEC_TIME[wf]).sum() for t in thresholds])
             else:

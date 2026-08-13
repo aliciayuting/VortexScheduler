@@ -21,8 +21,6 @@ class Workflow:
                 models[cfg["MODEL_ID"]],
                 cfg["INPUT_SIZE"],
                 cfg["OUTPUT_SIZE"],
-                cfg["MAX_WAIT_TIME"],
-                cfg["MAX_EMIT_BATCH_SIZE"],
                 cfg["SLO"] if slo_type == "NEXUS" else None)
             
             self.tasks[task.id] = task

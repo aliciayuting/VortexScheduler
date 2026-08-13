@@ -2,17 +2,12 @@ from core.configs.workflow_config import *
 from core.task import Task
 from core.data_models.workflow import Workflow
 
+
 class Job(object):
-
-    def __init__(self, simulation, create_time: float, workflow: Workflow, job_id: int, client_id: int, slo: float):
-        """
-        A job is a unique object across the simulation execution that has a specific graph of task dependencies (job_type_id)
-        """
-
-        self.simulation = simulation
+    def __init__(self, workflow: Workflow, job_id: int, client_id: int, slo: float, created_at: float):
 
         self.client_id: int = client_id
-        self.id: int = job_id    
+        self.id: int = job_id
         self.job_type_id: int = workflow.id
 
         self.workflow: Workflow = workflow
@@ -20,27 +15,24 @@ class Job(object):
         self.tasks: list[Task] = []
         for _, at in sorted(self.workflow.tasks.items(), key=lambda item: item[0]):
             self.tasks.append(at.create_task(self))
+
+        # task ID -> completion time, -1 for not complete
+        self._task_states: dict[Task, float] = {tid: -1 for tid in workflow.tasks.keys()}
         
-        self.ADFG = {}     # Activated Dataflow Graph scheduled by scheduler. map: task_id->worker_id
-        self.completed_tasks: list[int] = []
-        
-        self.create_time: float = create_time  
-        self.end_time: float = create_time
+        self.create_time = created_at
         self.slo: float = slo
 
     def __hash__(self):
         return hash(self.id)
 
     def __eq__(self, other):
-        if isinstance(other, Job):
-            return self.id == other.id
-        return False
-
-    def __ne__(self, other):
-        return not (self == other)
+        return isinstance(other, Job) and self.id == other.id
 
     def __str__(self):
-        return f"[Workflow {self.job_type_id}] [Job {self.id}]"
+        return f"[Job {self.id}, Workflow {self.job_type_id}]"
+    
+    def __repr__(self):
+        return self.__str__()
 
     def get_min_remaining_processing_time(self, init_proc_times={}, batch_sizes={}) -> float:
         """
@@ -75,15 +67,6 @@ class Job(object):
                 return task
         return None
 
-    def assign_ADFG(self, ADFG):
-        """
-        Function to assign the ADFG to the job and tasks within the job
-        :param ADFG: ADFG to be assigned to the job
-        """
-        self.ADFG = ADFG
-        for task in self.tasks:
-            task.ADFG = ADFG
-
     def job_completed(self, completion_time, task_id) -> bool:
         """ 
         Check if the all tasks in the job have completed
@@ -101,22 +84,31 @@ class Job(object):
                 return True
         return False
     
-    def remaining_tasks(self) -> list[Task]:
-        return list(filter(lambda t: t.task_id not in self.completed_tasks, self.tasks))
+    def is_complete(self) -> bool:
+        return all(t >= 0 for t in self._task_states.values())
     
-    def newly_available_tasks(self, newly_completed: Task) -> list[Task]:
-        """
-            Returns a list of incomplete tasks that are now ready for
-            execution given the completion of [newly_completed] task.
+    def set_completion_time(self, time: float, task_id: int):
+        assert(self._task_states[task_id] < 0)
+        self._task_states[task_id] = time
+    
+    def newly_available_tasks(self, dependency: Task) -> list[Task]:
+        """Fetches a list of incomplete dependents of a given task for which the
+        given task is the LAST dependency completed.
+
+        Args:
+            dependency: Filter incomplete tasks by those which require this
+            dependency as a direct predecessor.
+
+        Returns:
+            ready_tasks: List of dependents that are ready for execution after
+            given dependency is complete.
         """
         ready_tasks = []
-        for task in self.remaining_tasks():
-            if newly_completed.task_id in task.required_task_ids and \
-                all(t in self.completed_tasks for t in task.required_task_ids):
+        for task in self.tasks:
+            if self._task_states[task.task_id] < 0 and \
+                dependency.task_id in task.required_task_ids and \
+                all(self._task_states[rt_id] >= 0 for rt_id in task.required_task_ids) and \
+                self._task_states[dependency.task_id] == max([self._task_states[rt_id] for rt_id in task.required_task_ids]):
+                
                 ready_tasks.append(task)
         return ready_tasks
-
-    def print_job_info(self):
-        for task in self.tasks:
-            print("task{}, duration{}, required_task_ids{}".format(task.task_id, task.task_exec_duration,
-                                                                task.required_task_ids))
