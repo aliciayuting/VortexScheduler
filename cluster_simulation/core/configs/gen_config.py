@@ -1,16 +1,21 @@
 import numpy as np
 
-""" --------      Simulation Parameters      -------- """
+""" --------      Verification Parameters      -------- """
 
 PRODUCE_EVENT_LOG = True
 
+ENABLE_LIVE_VERIFICATION = True
+
 # Runs a trace of produced event logs to verify simulator actions
-ENABLE_VERIFICATION = True
+ENABLE_VERIFICATION = False
 ENABLE_TRACE_VERIFICATION = False
 VERIFICATION_WINDOW_SIZE = 5000 # only process up to this many events (don't do full trace)
 
 # Print event details for every step of verifier trace
-ENABLE_VERIFICATION_DEBUG_LOGGING = True
+ENABLE_VERIFICATION_DEBUG_LOGGING = False
+
+ENABLE_DUPLICATE_EVENT_CHECK = False
+ENABLE_CONSOLE_PRINT = False
 
 """ --------      Worker Machine Parameters      -------- """
 
@@ -24,43 +29,55 @@ MAX_NUM_MODELS_PER_NODE = 4
 """  --------       Workload Parameters    --------  """
 
 CLIENT_CONFIGS = [ # in ms
-    {6: {"NUM_JOBS": 5000,
-         "SEND_RATES": [40],
-         "SEND_RATE_CHANGE_INTERVALS": [], 
-         "SLO": int(62.48 * 2)}},
-    {7: {"NUM_JOBS": 5000,
-         "SEND_RATES": [40],
-         "SEND_RATE_CHANGE_INTERVALS": [], 
-         "SLO": int(70.48 * 2)}},
-    {8: {"NUM_JOBS": 5000,
-         "SEND_RATES": [40],
-         "SEND_RATE_CHANGE_INTERVALS": [], 
-         "SLO": int(80.48 * 2)}},
+    {6: {"SEND_RATES": [32],
+         "JOBS_PER_SEND_RATE": [5000],
+         "SLO": int(62.48 * 5)}},
+    {10: {"SEND_RATES": [32],
+         "JOBS_PER_SEND_RATE": [5000],
+         "SLO": int(70.48 * 5)}},
+    {11: {"SEND_RATES": [32],
+         "JOBS_PER_SEND_RATE": [5000],
+         "SLO": int(80.48 * 5)}},
 
-    # {1: {"NUM_JOBS": 5000,
-    #      "SEND_RATES": [8],#[12],
-    #      "SEND_RATE_CHANGE_INTERVALS": [], 
-    #      "SLO": int(256.3*2)}},
-    # {4: {"NUM_JOBS": 5000,
-    #      "SEND_RATES": [8],#[12],
-    #      "SEND_RATE_CHANGE_INTERVALS": [], 
-    #      "SLO": int(787.2*2)}},
-    # {5: {"NUM_JOBS": 5000,
-    #      "SEND_RATES": [8],#[12],
-    #      "SEND_RATE_CHANGE_INTERVALS": [], 
-    #      "SLO": int(388.7*2)}},
+#     {1: {"SEND_RATES": [6],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(186.3 * 5)}},
+#     {4: {"SEND_RATES": [6],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(358.6 * 5)}},
+#     {5: {"SEND_RATES": [6],
+#          "JOBS_PER_SEND_RATE": [5000],
+#          "SLO": int(326.7 * 5)}},
+
+    # {12: {"SEND_RATES": [44],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(24.05 * 5)}},
+    # {13: {"SEND_RATES": [72],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(47.75 * 5)}},
+    # {14: {"SEND_RATES": [12],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(108.25 * 5)}},
+
+    # {15: {"SEND_RATES": [28],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(124.0 * 5)}},
+    # {16: {"SEND_RATES": [28],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(125.56 * 5)}},
+    # {17: {"SEND_RATES": [28],
+    #       "JOBS_PER_SEND_RATE": [5000],
+    #       "SLO": int(124.0 * 5)}},
 ]
 
 WORKLOAD_DISTRIBUTION = "POISSON"  # CONSTANT | POISSON | GAMMA
 GAMMA_CV = 10  # Coefficient of variation for gamma distribution
-
 
 """  -------        Navigator Parameters  --------- """
 
 LOAD_INFORMATION_STALENESS = 1  # in ms
 PLACEMENT_INFORMATION_STALENESS = 1  # in ms
 RESCHEDULE_THREASHOLD = 1.5
-
 
 """  -------        Shepherd Parameters  --------- """
 
@@ -69,13 +86,13 @@ HERD_K = 1.5
 HERD_PERIODICITY = 12000    # run HERD every [HERD_PERIODICITY] ms
 ENABLE_PREEMPTION = True
 
-
 """  -------        Boost Parameters  --------- """
 
-BOOST_PARAMETER = 0.00293596042 # 0.00104567474
+BOOST_PARAMETER = 0.00293596042
 
-# JOB_SIZE | REMAINING_JOB_TIME | FCFS | EDF
-BOOST_POLICY = "EDF"
+# FCFS | EDF | LAXITY | RELATIVE_LAXITY
+# JOB_SIZE | REMAINING_EXEC_TIME | REMAINING_TIME_TO_DEADLINE | LAXITY_BOOST | RELATIVE_LAXITY_BOOST
+BOOST_POLICY = "FCFS"
 
 """ -------         Inferline Parameters  -------- """
 
@@ -91,49 +108,73 @@ ENABLE_ESTIMATOR_LOGGING = False
 
 """  -------        General Scheduling Parameters  --------- """
 
-# ROUND_ROBIN | HEFT
-DISPATCH_POLICY = "ROUND_ROBIN" #"HEFT"
+# ROUND_ROBIN (central or decentral) | SHEPHERD
+DISPATCH_POLICY = "ROUND_ROBIN"
+ENABLE_PIPELINING = False
+ENABLE_NETWORKING_DELAYS = False
 
-# OPTIMAL | LARGEST
-# [OPTIMAL] Largest batch for which all task SLOs are met
-# [LARGEST] Largest batch <= model max batch size
-BATCH_POLICY = "OPTIMAL"
+# LARGEST | LARGEST_FEASIBLE (largest non-SLO violating batch)
+BATCH_POLICY = "LARGEST"
 FALLBACK_TO_LARGEST_BATCH = False
+DISABLE_BATCHING = True  # always run batch size 1 when True
 
 # OPTIMAL | LATEST_POSSIBLE | CLUSTER_ADMISSION_LIMIT | NONE
 DROP_POLICY = "LATEST_POSSIBLE"
 
 SLO_SLACK = 0
-SLO_TYPE = "NEXUS" # JOB_LEVEL | NEXUS
+SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS
 
 ENABLE_MULTITHREADING = True # allow multiple models on same partition to run at once
 
 # NONE | INFERLINE
-AUTOSCALING_POLICY = "NONE" #"INFERLINE"
+AUTOSCALING_POLICY = "NONE"
 
 # HERD | CUSTOM | INFERLINE
-ALLOCATION_STRATEGY = "CUSTOM" #"INFERLINE"
+ALLOCATION_STRATEGY = "CUSTOM"
 
-# [(partition size in GB, [model ids])]
+# WF6/10/11 alloc (textvision variants)
 CUSTOM_ALLOCATION = [
     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
     (6, [14]), (6, [15]), (6, [16]), (6, [])
 ]
 
-# 12-node mutlitenant ppl 2 (3 versions) alloc
-# [
-#  (12, [4]), (6, [5,13]), (6, [5,13]),
-#  (12, [6]), (12, [6]), 
-#  (12, [7]), (12, [7]), 
-#  (12, [7]), (12, [7]),
-#  (12, [8]), (12, [8]),
-#  (24, [9]), 
-#  (24, [9]), 
-#  (24, [9]), 
-#  (24, [9]),
-#  (24, [10]),
-#  (24, [10]),
-#  (24, [10])]
+# 10-node multitenant ppl 2 (3 versions) alloc
+# CUSTOM_ALLOCATION = [
+#     (12, [4]), (6, [5,13]), (6, [5,13]),
+#     (12, [6]), (12, [6]),
+#     (12, [7]), (12, [7]),
+#     (12, [7]), (12, [7]),
+#     (12, [8]), (12, [8]),
+#     (24, [9]),
+#     (24, [9]),
+#     (24, [10]),
+#     (24, [10]),
+#     (24, [10])
+# ]
+
+# flmr-shared workflows (WF12/13/14) alloc
+# CUSTOM_ALLOCATION = [
+#     (6, [2]),
+#     (6, [5, 14]),
+#     (6, [5]),
+#     (6, [0, 12]),
+#     (6, [0]),
+#     (6, [12]),
+#     (6, [15]),
+#     (6, [11]),
+#     (24, [8, 11]),
+#     (24, [17]),
+#     (24, [17]),
+# ]
+
+# search_1-shared workflows (WF15/16/17) alloc
+# CUSTOM_ALLOCATION = [
+#     (12, [4]), (12, [4]),
+#     (12, [4]), (12, [4]),
+#     (6, [11]), (6, [11]), (6, [11]), (6, [11]),
+#     (12, [6]), (12, [6]), (12, [6]),
+#     (6, [5, 3]), (6, [12, 0]),
+# ]
 
 # ppl1 4 node alloc:
 # [(24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2])]

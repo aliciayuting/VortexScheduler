@@ -2,7 +2,7 @@ from core.model import Model
 from core.configs.workflow_config import *
 import core.configs.gen_config as gcfg
 
-from scipy.stats import linregress
+from scipy.stats import linregress, truncnorm
 from uuid import uuid4
 from copy import deepcopy
 
@@ -99,9 +99,6 @@ class ModelData:
 
         exact_exec_time = self.batch_exec_times[worker_size][batch_size]
         stddev = self.exec_cvs[worker_size] * exact_exec_time
-        
-        randomized_time = np.random.normal(loc=exact_exec_time, scale=stddev, size=1)
-        while randomized_time <= 0:
-            randomized_time = np.random.normal(loc=exact_exec_time, scale=stddev, size=1)
 
-        return randomized_time[0]
+        a = (0 - exact_exec_time) / stddev
+        return truncnorm.rvs(a, np.inf, loc=exact_exec_time, scale=stddev, size=1)[0]
