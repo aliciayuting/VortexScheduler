@@ -200,6 +200,13 @@ class LiveVerifier(EventListener):
             
             self.instance_states[event.kwargs["model_instance_id"]] = None
 
+        elif event.type.id == EventIds.JOBS_DROPPED:
+            # dropped tasks are removed from their queues and never execute,
+            # so stop anticipating their execution
+            dropped_job_ids = set(event.kwargs["job_ids"])
+            for key in [k for k in self.task_exec_queue if k[0] in dropped_job_ids]:
+                self.task_exec_queue.pop(key)
+
         elif event.type.id == EventIds.RESPONSE_SENT_TO_CLIENT:
             job: Job = event.kwargs["job"]
 

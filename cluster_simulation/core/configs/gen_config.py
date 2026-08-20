@@ -29,13 +29,13 @@ MAX_NUM_MODELS_PER_NODE = 4
 """  --------       Workload Parameters    --------  """
 
 CLIENT_CONFIGS = [ # in ms
-    {6: {"SEND_RATES": [32],
+    {6: {"SEND_RATES": [40],
          "JOBS_PER_SEND_RATE": [5000],
          "SLO": int(62.48 * 5)}},
-    {10: {"SEND_RATES": [32],
+    {10: {"SEND_RATES": [40],
          "JOBS_PER_SEND_RATE": [5000],
          "SLO": int(70.48 * 5)}},
-    {11: {"SEND_RATES": [32],
+    {11: {"SEND_RATES": [40],
          "JOBS_PER_SEND_RATE": [5000],
          "SLO": int(80.48 * 5)}},
 
@@ -114,15 +114,20 @@ ENABLE_PIPELINING = False
 ENABLE_NETWORKING_DELAYS = False
 
 # LARGEST | LARGEST_FEASIBLE (largest non-SLO violating batch)
+# NOTE: LARGEST_FEASIBLE is not wired up -- see TaskBatcher.get_batch
 BATCH_POLICY = "LARGEST"
-FALLBACK_TO_LARGEST_BATCH = False
-DISABLE_BATCHING = True  # always run batch size 1 when True
+FALLBACK_TO_LARGEST_BATCH = True
+DISABLE_BATCHING = False  # always run batch size 1 when True
 
-# OPTIMAL | LATEST_POSSIBLE | CLUSTER_ADMISSION_LIMIT | NONE
-DROP_POLICY = "LATEST_POSSIBLE"
+# NONE | LAZY | EARLY
+DROP_POLICY = "NONE"
+
+# NONE | PROBABILISTIC | ROUND_ROBIN
+ADMISSION_CONTROL_POLICY = "ROUND_ROBIN"
+ADMISSION_DROP_RATE = 0.25
 
 SLO_SLACK = 0
-SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS
+SLO_TYPE = "NEXUS" # JOB_LEVEL | NEXUS
 
 ENABLE_MULTITHREADING = True # allow multiple models on same partition to run at once
 

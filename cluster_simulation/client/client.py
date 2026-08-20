@@ -52,8 +52,12 @@ class Client(EventListener):
         elif event.type.id == EventIds.JOBS_DROPPED:
             for job_id in event.kwargs["job_ids"]:
                 if job_id in self.jobs:
-                    # should not have logged before
-                    assert(self.jobs[job_id][1] == -1)
+                    # workers holding parallel stages of the same job may drop it
+                    # simultaneously; keep the first drop and never drop a job
+                    # that already completed
+                    if self.jobs[job_id][1] != -1:
+                        assert(not self.jobs[job_id][2])
+                        continue
 
                     self.jobs[job_id] = (
                         self.jobs[job_id][0],

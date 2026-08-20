@@ -100,6 +100,11 @@ class DecentralRoundRobinScheduler(Scheduler):
             assert((task.job.id, task.task_id) not in self.output_locs)
             self.output_locs[(task.job.id, task.task_id)] = worker_id
 
+            # workers drop for decentralized schedulers; do not dispatch further
+            # stages of a job that was already dropped
+            if task.job.id in self.dropped_job_ids:
+                continue
+
             for next_task_id in task.next_task_ids:
                 # if next task was already scheduled, send outputs to assigned worker
                 if (task.job.id, next_task_id) in self.scheduled_task_to_worker:

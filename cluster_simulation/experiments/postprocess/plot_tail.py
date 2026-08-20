@@ -1,4 +1,5 @@
 import os
+import importlib.util
 
 import numpy as np
 import pandas as pd
@@ -9,14 +10,83 @@ import argparse
 
 from scipy.stats import linregress
 
-WORKFLOW_TYPE_TO_EXEC_TIME = {
-    6: 62.5,
-    7: 70.5,
-    8: 80.5,
-    1: 256.3,
-    4: 787.2,
-    5: 388.7
-}
+
+def _load_config(path: str):
+    spec = importlib.util.spec_from_file_location(
+        f"results_{path.replace(os.sep, '_')}", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load config from {path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _find_config_dir(src: str) -> str:
+    """Locates the config snapshot copied next to a run's logs. [src] may be either
+    the results root or the sim_logs directory inside it.
+    """
+    for candidate in [os.path.join(src, "configs"),
+                      os.path.join(src, os.pardir, "configs")]:
+        if os.path.isdir(candidate):
+            return candidate
+
+    raise FileNotFoundError(
+        f"No configs/ directory found for {src}; expected it in that directory or "
+        "its parent")
+
+
+def get_workflow_job_sizes(src: str) -> dict[int, float]:
+    """Returns each workflow's job size, i.e. the minimum time needed to run the
+    pipeline: the critical path through the DAG at batch size 1 with no queueing.
+
+    Read from the config snapshot in the results directory rather than hardcoded,
+    so a plot always reflects the configuration that run actually used.
+
+    Args:
+        src: Results directory for one run
+
+    Returns:
+        job_sizes: Workflow ID -> job size (ms)
+    """
+    cfg_dir = _find_config_dir(src)
+    wcfg = _load_config(os.path.join(cfg_dir, "workflow_config.py"))
+    mcfg = _load_config(os.path.join(cfg_dir, "model_config.py"))
+
+    # batch size 1 is always given directly in the config, so there is no need to
+    # rebuild ModelData's regression over the larger batch sizes
+    exec_times = {i: m["MIG_BATCH_EXEC_TIMES"][24][1] for i, m in enumerate(mcfg.MODELS)}
+
+    job_sizes = {}
+    for cfg in wcfg.WORKFLOW_LIST:
+        tasks = {t["TASK_INDEX"]: t for t in cfg["TASKS"]}
+
+        # walk the DAG in topological order accumulating the longest path. A task
+        # cannot start until every predecessor is done, hence max over predecessors.
+        finish_by: dict[int, float] = {}
+        ready = [t for t in tasks.values() if not t["PREV_TASK_INDEX"]]
+        while ready:
+            next_ready = []
+            for task in ready:
+                tid = task["TASK_INDEX"]
+                if tid in finish_by:
+                    continue
+
+                start = max([finish_by[p] for p in task["PREV_TASK_INDEX"]], default=0)
+                finish_by[tid] = start + (exec_times[task["MODEL_ID"]]
+                                          if task["MODEL_ID"] >= 0 else 0)
+
+                next_ready.extend([
+                    tasks[n] for n in task["NEXT_TASK_INDEX"]
+                    if n not in finish_by
+                    and all(p in finish_by for p in tasks[n]["PREV_TASK_INDEX"])])
+
+            ready = next_ready
+
+        assert(len(finish_by) == len(tasks))
+        job_sizes[cfg["JOB_TYPE"]] = max(finish_by.values())
+
+    return job_sizes
 
 def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: bool,
                                 save_fig: bool, out_path: str):
@@ -147,18 +217,18 @@ def plot_slo_as_job_size_vs_tail_cdf(srcs: list[tuple[str, str]], save_fig: bool
         if len(finite_max) > 0:
             max_res = max(max_res, int(finite_max.max()) + 1)
 
-        loaded_srcs.append((name, data))
+        loaded_srcs.append((name, data, get_workflow_job_sizes(dir)))
 
     thresholds = np.linspace(0, 8, 200)
-    for i, (name, data) in enumerate(loaded_srcs):
+    for i, (name, data, job_sizes) in enumerate(loaded_srcs):
         cts = None
         workflows = sorted(set(data['workflow_id']))
         for wf in workflows:
             subset = data.loc[data['workflow_id'] == wf, 'response_time'].values
             if cts is None:
-                cts = np.array([(subset > t * WORKFLOW_TYPE_TO_EXEC_TIME[wf]).sum() for t in thresholds])
+                cts = np.array([(subset > t * job_sizes[wf]).sum() for t in thresholds])
             else:
-                cts += np.array([(subset > t * WORKFLOW_TYPE_TO_EXEC_TIME[wf]).sum() for t in thresholds])
+                cts += np.array([(subset > t * job_sizes[wf]).sum() for t in thresholds])
             
         cdf = cts / len(data)
         cdf[cdf == 0] = np.nan
@@ -196,7 +266,9 @@ if __name__ == "__main__":
     parser.add_argument("--out", type=str,
                         help="Output directory path for saved figures")
     parser.add_argument("--slo-as-job-size", action="store_true",
-                        help="Plot SLO as multiple of job size instead of absolute response time")
+                        help="Plot response time as a multiple of job size (the "
+                             "workflow's critical path at batch size 1) instead of "
+                             "in absolute ms")
 
     args = parser.parse_args()
 

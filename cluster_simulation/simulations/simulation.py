@@ -17,6 +17,7 @@ from workers.worker import Worker
 
 from core.allocation import ModelAllocation
 from schedulers.algo.vortex_planner_algo import VortexPlanner
+from schedulers.algo.nexus_algo import NexusSLOSplitter
 
 from verifiers.live_verifier import LiveVerifier
 from verifiers.log_verifier import LogVerifier
@@ -43,6 +44,8 @@ class Simulation:
 
         self.allocation = self._generate_model_allocation()
         self.workers = self._generate_workers()
+
+        self._assign_nexus_task_slos()
 
         self.scheduler = None
         scheduler_worker_id = None
@@ -172,6 +175,39 @@ class Simulation:
                                                 slo)
 
 
+    def _assign_nexus_task_slos(self):
+        """Splits each configured workflow's job SLO across its pipeline stages,
+        giving every task its own deadline. Runs once at setup, after model
+        placement is known, since the split depends on how many workers host each
+        model. No-op unless SLO_TYPE is NEXUS.
+        """
+        if gcfg.SLO_TYPE != "NEXUS":
+            return
+
+        assigned_slos: dict[int, float] = {}
+        for cfg in gcfg.CLIENT_CONFIGS:
+            for wid, cfgw in cfg.items():
+                # one Workflow object is shared by every client sending that
+                # workflow, so a single split has to serve all of them
+                assert(wid not in assigned_slos or assigned_slos[wid] == cfgw["SLO"]), \
+                    f"Workflow {wid} is sent with conflicting SLOs; cannot split per stage"
+
+                if wid in assigned_slos:
+                    continue
+
+                workflow = self.workflows[wid]
+
+                # plan for the heaviest configured send rate
+                arrival_rates = NexusSLOSplitter.get_task_arrival_rates(
+                    workflow, max(cfgw["SEND_RATES"]), self.workers)
+
+                workflow.assign_task_slos(
+                    NexusSLOSplitter.generate_task_slos(workflow, cfgw["SLO"], arrival_rates),
+                    cfgw["SLO"])
+
+                assigned_slos[wid] = cfgw["SLO"]
+
+
     def _generate_workers(self) -> dict[UUID, Worker]:
         """Generates and initializes model placements for initial worker objects.
 
@@ -213,6 +249,7 @@ class Simulation:
             self.em.event_log.to_csv(os.path.join(self.out_path, "event_log.csv"))
         
         self._produce_agent_keys()
+        self._produce_nexus_slo_split_log()
 
         if gcfg.ENABLE_LIVE_VERIFICATION:
             self.verifier.verify_on_sim_end()
@@ -234,6 +271,35 @@ class Simulation:
         worker_log.to_csv(os.path.join(self.out_path, "worker_config_log.csv"))
         self.worker_config_log = worker_log
         # TODO: client log
+
+
+    def _produce_nexus_slo_split_log(self):
+        """Writes the per-stage SLO split that NexusSLOSplitter produced for each
+        workflow. No-op unless SLO_TYPE is NEXUS, since no split exists otherwise.
+        """
+        if gcfg.SLO_TYPE != "NEXUS":
+            return
+
+        slo_df = pd.DataFrame(columns=["workflow_id", "task_id", "model_id", "job_slo",
+                                       "task_slo", "task_deadline_offset",
+                                       "max_batch_size", "min_exec_time"])
+        for workflow in sorted(self.workflows.values(), key=lambda w: w.id):
+            if not workflow.task_deadline_offsets:
+                continue
+
+            for task_id, task in sorted(workflow.tasks.items()):
+                slo_df.loc[len(slo_df)] = {
+                    "workflow_id": workflow.id,
+                    "task_id": task_id,
+                    "model_id": task.model_data.id,
+                    "job_slo": workflow.job_slo,
+                    "task_slo": workflow.task_slos[task_id],
+                    "task_deadline_offset": workflow.task_deadline_offsets[task_id],
+                    "max_batch_size": workflow.task_max_batch_sizes[task_id],
+                    "min_exec_time": task.model_data.batch_exec_times[24][1]
+                }
+
+        slo_df.to_csv(os.path.join(self.out_path, "nexus_slo_split.csv"))
 
 
     def _postprocess_nonexec_delays(self):

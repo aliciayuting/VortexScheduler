@@ -23,9 +23,15 @@ class Task(object):
         self.ADFG = {}                                  # ADFG assigned to the job that this task belongs to
 
     def get_task_deadline(self):
+        """Returns the time by which this task must finish. Under job-level SLOs
+        that is the job's own deadline; under NEXUS SLOs it is the deadline of
+        this task's pipeline stage.
+        """
         if gcfg.SLO_TYPE == "NEXUS":
-            assert(self.deadline != None)
-            return self.deadline
+            # read through the workflow rather than a value copied at task creation,
+            # since the split is computed after model placement, i.e. after jobs exist
+            offset = self.job.workflow.get_task_deadline_offset(self.task_id)
+            return self.job.create_time + offset * (1 + gcfg.SLO_SLACK)
         else:
             return self.job.create_time + self.job.slo * (1 + gcfg.SLO_SLACK)
 

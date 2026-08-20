@@ -36,7 +36,65 @@ class Workflow:
                                for id in cfg["PREV_TASK_INDEX"]]
             task.next_tasks = [self.tasks[id]
                                for id in cfg["NEXT_TASK_INDEX"]]
-            
+
+        # per-stage SLO split, populated by assign_task_slos() when SLO_TYPE is NEXUS
+        self.job_slo: float | None = None
+        self.task_slos: dict[int, float] = {}
+        self.task_max_batch_sizes: dict[int, int] = {}
+        self.task_deadline_offsets: dict[int, float] = {}
+
+    def assign_task_slos(self, task_slos: dict[int, tuple[float, int]], job_slo: float):
+        """Records a per-stage SLO split (see NexusSLOSplitter) and derives the
+        deadline offset of each task from job create time.
+
+        A stage cannot start until every incoming branch has finished, so its
+        deadline offset is its own budget plus the LARGEST offset among its
+        predecessors.
+
+        Args:
+            task_slos: (stage SLO, max batch size) for each task ID, as produced
+            by NexusSLOSplitter.generate_task_slos
+            job_slo: Job-level SLO the split was derived from (ms)
+        """
+        assert(set(task_slos.keys()) == set(self.tasks.keys()))
+
+        self.job_slo = job_slo
+        self.task_slos = {tid: slo for tid, (slo, _) in task_slos.items()}
+        self.task_max_batch_sizes = {tid: bsize for tid, (_, bsize) in task_slos.items()}
+
+        self.task_deadline_offsets = {}
+        ready = list(self.initial_tasks)
+        while ready:
+            next_ready = []
+            for task in ready:
+                if task.id in self.task_deadline_offsets:
+                    continue
+
+                spent = max([self.task_deadline_offsets[pt.id] for pt in task.prev_tasks],
+                            default=0)
+                self.task_deadline_offsets[task.id] = spent + self.task_slos[task.id]
+
+                next_ready.extend([
+                    t for t in task.next_tasks
+                    if t.id not in self.task_deadline_offsets
+                    and all(pt.id in self.task_deadline_offsets for pt in t.prev_tasks)])
+
+            ready = next_ready
+
+        assert(len(self.task_deadline_offsets) == len(self.tasks))
+
+        # meeting every stage deadline must imply meeting the job deadline
+        assert(max(self.task_deadline_offsets.values()) <= job_slo)
+
+    def get_task_deadline_offset(self, task_id: int) -> float:
+        """Returns the time from job create time by which [task_id] must finish
+        under per-stage (NEXUS) SLOs.
+        """
+        assert(self.task_deadline_offsets), \
+            f"No per-stage SLO split assigned for workflow {self.id}"
+
+        return self.task_deadline_offsets[task_id]
+
     def get_models(self) -> list[ModelData]:
         """
         Returns all models used by any task in workflow.
