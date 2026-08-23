@@ -5,8 +5,13 @@ from queue import PriorityQueue
 from core.job import Job
 from core.task import Task
 
+from core.data_models.workflow import Workflow
+
+from workers.worker import Worker
+
+from schedulers.algo.admission_algo import AdmissionController
 from schedulers.algo.drop_algo import (should_drop_task, drop_from_queue,
-                                       scheduler_manages_queues, AdmissionController)
+                                       scheduler_manages_queues)
 
 from events.event_manager import EventManager
 from events.event import *
@@ -15,10 +20,13 @@ from events.event_types import *
 
 class Scheduler(EventListener):
 
-    def __init__(self, em: EventManager):
+    def __init__(self, em: EventManager, workers: dict[UUID, Worker],
+                 workflows: dict[int, Workflow]):
         super().__init__(Agent.SCHEDULER)
 
         self.em = em
+        self.workers = workers
+        self.workflows = workflows
 
         # drop where the queues are: a scheduler that queues and batches tasks
         # itself drops here, otherwise the workers own the queues and drop there
@@ -27,10 +35,10 @@ class Scheduler(EventListener):
         # jobs known to be dropped, by this scheduler or by a worker
         self.dropped_job_ids: set[int] = set()
 
-        # flat rate load shedding at the front door, independent of DROP_POLICY.
-        # Jobs arrive at the scheduler under every dispatch policy, so this runs
-        # here regardless of where queues are managed.
-        self.admission_controller = AdmissionController()
+        # load shedding at the front door, independent of DROP_POLICY. Jobs
+        # arrive at the scheduler under every dispatch policy, so this runs here
+        # regardless of where queues are managed.
+        self.admission_controller = AdmissionController(workflows, workers)
 
         self.em.register_listener(self, {
             EVENT_TYPES[EventIds.JOB_ARRIVAL_AT_SCHEDULER],
@@ -86,8 +94,8 @@ class Scheduler(EventListener):
             raise ValueError(f"Scheduler received unregistered event: {event}")
 
     def _reject_on_arrival(self, time: float, job: Job) -> bool:
-        """Applies flat rate admission control to a job that just arrived, emitting
-        JOBS_DROPPED for it if the configured rate says to shed it.
+        """Applies admission control to a job that just arrived, emitting
+        JOBS_DROPPED for it if the configured policy says to shed it.
 
         Args:
             time: Time the job arrived at the scheduler
@@ -96,7 +104,7 @@ class Scheduler(EventListener):
         Returns:
             rejected: True if the job was rejected and should not be dispatched
         """
-        if not self.admission_controller.should_reject(job):
+        if not self.admission_controller.should_reject(time, job):
             return False
 
         self._emit_drops(time, [job.id])

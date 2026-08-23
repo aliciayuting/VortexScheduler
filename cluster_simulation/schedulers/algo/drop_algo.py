@@ -1,10 +1,7 @@
 from queue import PriorityQueue
 
-import numpy as np
-
 import core.configs.gen_config as gcfg
 
-from core.job import Job
 from core.task import Task
 from schedulers.algo.boost_algo import _get_processing_time
 
@@ -13,56 +10,6 @@ from schedulers.algo.boost_algo import _get_processing_time
 # LAZY:    drop once the job's deadline has already passed
 # EARLY:   drop as soon as the job can no longer meet its deadline
 DROP_POLICIES = ["NONE", "LAZY", "EARLY"]
-
-# NONE:          admit every job
-# PROBABILISTIC: reject each arriving job independently with probability
-#                ADMISSION_DROP_RATE
-# ROUND_ROBIN:   reject one job out of every round(1 / ADMISSION_DROP_RATE)
-ADMISSION_CONTROL_POLICIES = ["NONE", "PROBABILISTIC", "ROUND_ROBIN"]
-
-
-class AdmissionController:
-    """Flat rate load shedding, applied to jobs as they arrive at the scheduler.
-
-    Independent of DROP_POLICY: admission control rejects a fixed fraction of
-    arrivals at the front door without regard to deadlines, while the drop policy
-    aborts jobs mid-flight once their deadline is known to be unreachable. Both
-    may be enabled at once.
-    """
-
-    def __init__(self):
-        # arrivals seen since the run began, for round robin rejection
-        self.arrival_count = 0
-
-    def should_reject(self, job: Job) -> bool:
-        """Decides whether a newly arrived [job] should be rejected.
-
-        Args:
-            job: Job that just arrived at the scheduler
-
-        Returns:
-            should_reject: True if the job should be rejected on arrival
-        """
-        if gcfg.ADMISSION_CONTROL_POLICY == "NONE":
-            return False
-
-        rate = gcfg.ADMISSION_DROP_RATE
-        assert(0 <= rate <= 1), f"ADMISSION_DROP_RATE must be in [0, 1], got {rate}"
-
-        if rate == 0:
-            return False
-
-        self.arrival_count += 1
-
-        if gcfg.ADMISSION_CONTROL_POLICY == "PROBABILISTIC":
-            return np.random.random() < rate
-        elif gcfg.ADMISSION_CONTROL_POLICY == "ROUND_ROBIN":
-            # reject exactly one job out of every [period] arrivals
-            period = max(1, round(1 / rate))
-            return self.arrival_count % period == 0
-
-        raise ValueError("Unrecognized admission control policy "
-                         f"{gcfg.ADMISSION_CONTROL_POLICY}")
 
 # dispatch policies whose scheduler holds the task queues and forms batches itself
 _SCHEDULER_QUEUE_POLICIES = {"SHEPHERD"}

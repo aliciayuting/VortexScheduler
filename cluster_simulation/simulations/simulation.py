@@ -7,6 +7,8 @@ import core.configs.model_config as mcfg
 
 from core.data_models.workflow import Workflow
 from core.data_models.model_data import ModelData
+from core.workload import (get_client_workloads, get_workflow_peak_rates,
+                           get_workflow_slos)
 
 from client.client import Client
 from network.network import Network
@@ -90,21 +92,15 @@ class Simulation:
         """
         clients: list[Client] = []
         created_job_count = 0
-        for cfg in gcfg.CLIENT_CONFIGS:
-            for wid, cfgw in cfg.items():
-                clients.append(Client(uuid4(), self.em))
+        for wid, workload, slo in get_client_workloads():
+            client = Client(uuid4(), self.em)
+            clients.append(client)
 
-                prev_create_time = 0
-                for i, send_rate in enumerate(cfgw["SEND_RATES"]):
-                    n_jobs = cfgw["JOBS_PER_SEND_RATE"][i]
-                    prev_create_time = clients[-1].generate_jobs(
-                        self.workflows[wid], 
-                        n_jobs, 
-                        prev_create_time, 
-                        send_rate,
-                        cfgw["SLO"],
-                        created_job_count)
-                    created_job_count += n_jobs
+            client.generate_jobs(self.workflows[wid], workload, 0, slo, created_job_count)
+
+            # job IDs are global, so the next client picks up where this one left off
+            created_job_count += len(client.jobs)
+
         return clients
     
 
@@ -180,32 +176,24 @@ class Simulation:
         giving every task its own deadline. Runs once at setup, after model
         placement is known, since the split depends on how many workers host each
         model. No-op unless SLO_TYPE is NEXUS.
+
+        One Workflow object is shared by every client sending it, so the split is
+        planned for the heaviest load that workflow can see: the sum of its
+        clients' peak send rates.
         """
         if gcfg.SLO_TYPE != "NEXUS":
             return
 
-        assigned_slos: dict[int, float] = {}
-        for cfg in gcfg.CLIENT_CONFIGS:
-            for wid, cfgw in cfg.items():
-                # one Workflow object is shared by every client sending that
-                # workflow, so a single split has to serve all of them
-                assert(wid not in assigned_slos or assigned_slos[wid] == cfgw["SLO"]), \
-                    f"Workflow {wid} is sent with conflicting SLOs; cannot split per stage"
+        peak_rates = get_workflow_peak_rates()
+        slos = get_workflow_slos()
 
-                if wid in assigned_slos:
-                    continue
+        for wid, workflow in self.workflows.items():
+            arrival_rates = NexusSLOSplitter.get_task_arrival_rates(
+                workflow, peak_rates[wid], self.workers)
 
-                workflow = self.workflows[wid]
-
-                # plan for the heaviest configured send rate
-                arrival_rates = NexusSLOSplitter.get_task_arrival_rates(
-                    workflow, max(cfgw["SEND_RATES"]), self.workers)
-
-                workflow.assign_task_slos(
-                    NexusSLOSplitter.generate_task_slos(workflow, cfgw["SLO"], arrival_rates),
-                    cfgw["SLO"])
-
-                assigned_slos[wid] = cfgw["SLO"]
+            workflow.assign_task_slos(
+                NexusSLOSplitter.generate_task_slos(workflow, slos[wid], arrival_rates),
+                slos[wid])
 
 
     def _generate_workers(self) -> dict[UUID, Worker]:
@@ -250,6 +238,7 @@ class Simulation:
         
         self._produce_agent_keys()
         self._produce_nexus_slo_split_log()
+        self._produce_admission_control_log()
 
         if gcfg.ENABLE_LIVE_VERIFICATION:
             self.verifier.verify_on_sim_end()
@@ -271,6 +260,15 @@ class Simulation:
         worker_log.to_csv(os.path.join(self.out_path, "worker_config_log.csv"))
         self.worker_config_log = worker_log
         # TODO: client log
+
+
+    def _produce_admission_control_log(self):
+        """Writes what admission control did to each workflow: the capacity it
+        estimated, the rate and burst size it allowed, and how many jobs it turned
+        away.
+        """
+        stats = self.scheduler.admission_controller.get_stats()
+        pd.DataFrame(stats).to_csv(os.path.join(self.out_path, "admission_control.csv"))
 
 
     def _produce_nexus_slo_split_log(self):

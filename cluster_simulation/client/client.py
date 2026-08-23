@@ -3,11 +3,11 @@ from events.event import *
 from events.event_types import *
 
 from core.data_models.workflow import Workflow
+from core.workload import Workload
 
 from uuid import UUID
 
 import core.configs.gen_config as gcfg
-import numpy as np
 
 
 class Client(EventListener):
@@ -70,41 +70,31 @@ class Client(EventListener):
         else:
             raise ValueError(f"Client received unregistered event: {event}")
     
-    def generate_jobs(self, workflow: Workflow, num_jobs: int, start_time: float, send_rate: float, slo: float, job_id_range_start: int) -> float:
-        """Generates a given number of jobs at random intervals according to the configured
-        workload distribution.
+    def generate_jobs(self, workflow: Workflow, workload: Workload, start_time: float,
+                      slo: float, job_id_range_start: int) -> float:
+        """Generates jobs at the times [workload] sends them and enqueues the send
+        events for all of them.
 
         Args:
             workflow: Workflow to generate jobs from
-            num_jobs: Total number of jobs to generate
-            start_time: Time to start sending jobs (ms)
-            send_rate: Desired average send rate (qps)
+            workload: Send pattern to generate arrival times from
+            start_time: Time the workload starts (ms)
+            slo: Job level SLO of the generated jobs (ms)
+            job_id_range_start: ID to assign the first generated job
 
         Returns:
-            last_create_time: Create time of the last job generated
+            last_create_time: Create time of the last job generated, or
+            [start_time] if the workload generated none
         """
+        arrival_times = workload.generate_arrival_times(start_time)
 
-        prev_time = start_time
-        last_create = -1
-        for n in range(num_jobs):
-            job_create_delay = 1 / send_rate * 1000
-
-            if gcfg.WORKLOAD_DISTRIBUTION == "POISSON":
-                job_create_delay = np.random.poisson(lam=(1 / send_rate * 1000))
-            elif gcfg.WORKLOAD_DISTRIBUTION == "GAMMA":
-                shape = (1 / send_rate * 1000)**2 / gcfg.GAMMA_CV**2
-                scale = gcfg.GAMMA_CV**2 / (1 / send_rate * 1000)
-                job_create_delay = np.random.gamma(shape, scale)
-            
-            job_create_time = prev_time + job_create_delay
+        for n, job_create_time in enumerate(arrival_times):
             job = Job(created_at=job_create_time,
                       workflow=workflow,
                       job_id=job_id_range_start + n, 
                       client_id=self.id,
                       slo=slo)
-            
-            last_create = job_create_time
-            prev_time = job_create_time
+
             self.jobs[job_id_range_start + n] = (
                 job_create_time, -1, False, job_create_time + slo, job)
 
@@ -114,4 +104,4 @@ class Client(EventListener):
                       kwargs={"job": job, "from_client_id": self.id, "ignore_transfer_time": not gcfg.ENABLE_NETWORKING_DELAYS}),
                 self.emitter_id)
 
-        return last_create
+        return arrival_times[-1] if arrival_times else start_time

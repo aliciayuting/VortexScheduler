@@ -28,50 +28,88 @@ MAX_NUM_MODELS_PER_NODE = 4
 
 """  --------       Workload Parameters    --------  """
 
-CLIENT_CONFIGS = [ # in ms
-    {6: {"SEND_RATES": [40],
-         "JOBS_PER_SEND_RATE": [5000],
+# A workload is a list of PHASES run back to back, plus the ARRIVAL_PROCESS that
+# turns the rate of the current phase into individual arrivals (CONSTANT | POISSON
+# | GAMMA, defaulting to DEFAULT_ARRIVAL_PROCESS below). Every phase ends after
+# either DURATION ms or NUM_JOBS jobs, and takes one of these shapes:
+#
+#   {"KIND": "CONSTANT", "RATE": 40}                      steady at 40 qps
+#   {"KIND": "BURST", "RATE": 20, "BURST_RATE": 90,       20 qps, spiking to 90 qps
+#    "BURST_DURATION": 2000, "QUIET_DURATION": 8000}      for ~2s out of every ~10s
+#
+# A BURST phase draws each burst and each gap between bursts from an exponential
+# around the configured mean, unless "STOCHASTIC": False makes them exactly that
+# long. GAMMA workloads take a "GAMMA_CV" per workload; a CV above 1 clusters
+# arrivals more tightly than Poisson does, below 1 spreads them more evenly.
+
+CLIENT_CONFIGS = [
+    # WF6/10/11 (textvision variants)
+    # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 40, "NUM_JOBS": 5000}]},
+    #      "SLO": int(62.48 * 5)}},
+    # {10: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 40, "NUM_JOBS": 5000}]},
+    #       "SLO": int(70.48 * 5)}},
+    # {11: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 40, "NUM_JOBS": 5000}]},
+    #       "SLO": int(80.48 * 5)}},
+
+    # WF6/10/11 (textvision variants) with spike
+    {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+                      "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
+                                  "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
+                                  "STOCHASTIC": True, "DURATION": 40000},
+                                 {"KIND": "CONSTANT", "RATE": 35, "DURATION": 80000}]},
          "SLO": int(62.48 * 5)}},
-    {10: {"SEND_RATES": [40],
-         "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(70.48 * 5)}},
-    {11: {"SEND_RATES": [40],
-         "JOBS_PER_SEND_RATE": [5000],
-         "SLO": int(80.48 * 5)}},
+    {10: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+                       "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
+                                   "QUIET_DURATION": 60000, "BURST_DURATION": 10000,
+                                   "STOCHASTIC": True, "DURATION": 70000},
+                                  {"KIND": "CONSTANT", "RATE": 35, "DURATION": 50000}]},
+          "SLO": int(70.48 * 5)}},
+    {11: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+                       "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
+                                   "QUIET_DURATION": 90000, "BURST_DURATION": 10000,
+                                   "STOCHASTIC": True, "DURATION": 100000},
+                                  {"KIND": "CONSTANT", "RATE": 35, "DURATION": 20000}]},
+          "SLO": int(80.48 * 5)}},
 
-#     {1: {"SEND_RATES": [6],
-#          "JOBS_PER_SEND_RATE": [5000],
-#          "SLO": int(186.3 * 5)}},
-#     {4: {"SEND_RATES": [6],
-#          "JOBS_PER_SEND_RATE": [5000],
-#          "SLO": int(358.6 * 5)}},
-#     {5: {"SEND_RATES": [6],
-#          "JOBS_PER_SEND_RATE": [5000],
-#          "SLO": int(326.7 * 5)}},
+    # WF1/4/5 (multitenant ppl 2)
+    # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 6, "NUM_JOBS": 5000}]},
+    #      "SLO": int(186.3 * 5)}},
+    # {4: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 6, "NUM_JOBS": 5000}]},
+    #      "SLO": int(358.6 * 5)}},
+    # {5: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 6, "NUM_JOBS": 5000}]},
+    #      "SLO": int(326.7 * 5)}},
 
-    # {12: {"SEND_RATES": [44],
-    #       "JOBS_PER_SEND_RATE": [5000],
+    # WF12/13/14 (flmr-shared)
+    # {12: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 44, "NUM_JOBS": 5000}]},
     #       "SLO": int(24.05 * 5)}},
-    # {13: {"SEND_RATES": [72],
-    #       "JOBS_PER_SEND_RATE": [5000],
+    # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 72, "NUM_JOBS": 5000}]},
     #       "SLO": int(47.75 * 5)}},
-    # {14: {"SEND_RATES": [12],
-    #       "JOBS_PER_SEND_RATE": [5000],
+    # {14: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 12, "NUM_JOBS": 5000}]},
     #       "SLO": int(108.25 * 5)}},
 
-    # {15: {"SEND_RATES": [28],
-    #       "JOBS_PER_SEND_RATE": [5000],
+    # WF15/16/17 (search_1-shared)
+    # {15: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 28, "NUM_JOBS": 5000}]},
     #       "SLO": int(124.0 * 5)}},
-    # {16: {"SEND_RATES": [28],
-    #       "JOBS_PER_SEND_RATE": [5000],
+    # {16: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 28, "NUM_JOBS": 5000}]},
     #       "SLO": int(125.56 * 5)}},
-    # {17: {"SEND_RATES": [28],
-    #       "JOBS_PER_SEND_RATE": [5000],
+    # {17: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 28, "NUM_JOBS": 5000}]},
     #       "SLO": int(124.0 * 5)}},
 ]
 
-WORKLOAD_DISTRIBUTION = "POISSON"  # CONSTANT | POISSON | GAMMA
-GAMMA_CV = 10  # Coefficient of variation for gamma distribution
+DEFAULT_ARRIVAL_PROCESS = "POISSON"  # CONSTANT | POISSON | GAMMA
+DEFAULT_GAMMA_CV = 1.5  # coefficient of variation of gamma inter-arrival times
 
 """  -------        Navigator Parameters  --------- """
 
@@ -97,9 +135,9 @@ BOOST_POLICY = "FCFS"
 """ -------         Inferline Parameters  -------- """
 
 ESTIMATOR_CLIENT_CONFIGS = [ # in ms
-    {0: {"NUM_JOBS": 1000,
-         "SEND_RATES": [55, 95],
-         "SEND_RATE_CHANGE_INTERVALS": [500], 
+    {0: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+                      "PHASES": [{"KIND": "CONSTANT", "RATE": 55, "NUM_JOBS": 1000},
+                                 {"KIND": "CONSTANT", "RATE": 95, "NUM_JOBS": 1000}]},
          "SLO": 1014}},
 ]
 INFERLINE_TUNING_INTERVAL = 15 * 1000 # ms
@@ -121,13 +159,18 @@ DISABLE_BATCHING = False  # always run batch size 1 when True
 
 # NONE | LAZY | EARLY
 DROP_POLICY = "NONE"
-
-# NONE | PROBABILISTIC | ROUND_ROBIN
-ADMISSION_CONTROL_POLICY = "ROUND_ROBIN"
-ADMISSION_DROP_RATE = 0.25
-
 SLO_SLACK = 0
-SLO_TYPE = "NEXUS" # JOB_LEVEL | NEXUS
+SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS
+
+# NONE | PROBABILISTIC | ROUND_ROBIN | TOKEN_BUCKET
+ADMISSION_CONTROL_POLICY = "TOKEN_BUCKET"
+ADMISSION_DROP_RATE = 0.1  # PROBABILISTIC or ROUND_ROBIN
+ADMISSION_TARGET_UTILIZATION = 0.9  # TOKEN_BUCKET: fraction of estimated capacity to admit
+
+# TOKEN_BUCKET: largest burst admitted at once, in jobs. None derives it per
+# workflow from the SLO: the burst the cluster can drain before the jobs at the
+# back of it run out of slack
+ADMISSION_BURST_SIZE = 5
 
 ENABLE_MULTITHREADING = True # allow multiple models on same partition to run at once
 

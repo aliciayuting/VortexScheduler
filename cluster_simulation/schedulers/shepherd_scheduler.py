@@ -23,11 +23,9 @@ from events.event_types import *
 
 class ShepherdScheduler(Scheduler):
 
-    def __init__(self, em: EventManager, workers: dict[UUID, Worker], workflows: list[Workflow], scheduler_worker_id: UUID):
-        super().__init__(em)
+    def __init__(self, em: EventManager, workers: dict[UUID, Worker], workflows: dict[int, Workflow], scheduler_worker_id: UUID):
+        super().__init__(em, workers, workflows)
 
-        self.workers = workers
-        self.workflows = workflows
         self.scheduler_worker_id = scheduler_worker_id
 
         # (worker ID, instance ID) -> list[(job ID, task ID)] to record scheduling decisions
