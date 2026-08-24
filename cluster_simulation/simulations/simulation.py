@@ -190,9 +190,11 @@ class Simulation:
         for wid, workflow in self.workflows.items():
             arrival_rates = NexusSLOSplitter.get_task_arrival_rates(
                 workflow, peak_rates[wid], self.workers)
+            worker_sizes = NexusSLOSplitter.get_task_worker_sizes(workflow, self.workers)
 
             workflow.assign_task_slos(
-                NexusSLOSplitter.generate_task_slos(workflow, slos[wid], arrival_rates),
+                NexusSLOSplitter.generate_task_slos(
+                    workflow, slos[wid], arrival_rates, worker_sizes),
                 slos[wid])
 
 
@@ -280,10 +282,12 @@ class Simulation:
 
         slo_df = pd.DataFrame(columns=["workflow_id", "task_id", "model_id", "job_slo",
                                        "task_slo", "task_deadline_offset",
-                                       "max_batch_size", "min_exec_time"])
+                                       "max_batch_size", "worker_size", "min_exec_time"])
         for workflow in sorted(self.workflows.values(), key=lambda w: w.id):
             if not workflow.task_deadline_offsets:
                 continue
+
+            worker_sizes = NexusSLOSplitter.get_task_worker_sizes(workflow, self.workers)
 
             for task_id, task in sorted(workflow.tasks.items()):
                 slo_df.loc[len(slo_df)] = {
@@ -294,7 +298,8 @@ class Simulation:
                     "task_slo": workflow.task_slos[task_id],
                     "task_deadline_offset": workflow.task_deadline_offsets[task_id],
                     "max_batch_size": workflow.task_max_batch_sizes[task_id],
-                    "min_exec_time": task.model_data.batch_exec_times[24][1]
+                    "worker_size": worker_sizes[task_id],
+                    "min_exec_time": task.model_data.batch_exec_times[worker_sizes[task_id]][1]
                 }
 
         slo_df.to_csv(os.path.join(self.out_path, "nexus_slo_split.csv"))

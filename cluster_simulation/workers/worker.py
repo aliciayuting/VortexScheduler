@@ -281,7 +281,8 @@ class Worker(EventListener):
         if model_id not in self.queues:
             return
 
-        newly_dropped = drop_from_queue(time, self.queues[model_id], self.dropped_job_ids)
+        newly_dropped = drop_from_queue(time, self.queues[model_id], self.dropped_job_ids,
+                                        self.total_memory_gb)
         if not newly_dropped:
             return
 

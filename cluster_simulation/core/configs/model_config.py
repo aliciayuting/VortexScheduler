@@ -58,7 +58,7 @@ MODELS = [
         # model id 4
         "MODEL_NAME": "audio_det",
         "MODEL_SIZE": 6093000,      # in kB
-        "MAX_BATCH_SIZE": 8,
+        "MAX_BATCH_SIZE": 4,
         "MIG_BATCH_EXEC_TIMES": {
             24: {1: 65.0, 2: 68.0, 3: 69.4, 4: 72.1},
             12: {1: 65.0, 2: 68.0, 3: 69.4, 4: 72.1} # TODO: update with real nums
@@ -69,7 +69,7 @@ MODELS = [
         # model id 5
         "MODEL_NAME": "encode_search-ivf",
         "MODEL_SIZE": 1210000,       # in kB
-        "MAX_BATCH_SIZE": 8,
+        "MAX_BATCH_SIZE": 4,
         "MIG_BATCH_EXEC_TIMES": {
             24: {1: 16.7, 2: 17.2, 3: 17.5, 4: 17.5}, # TODO [0.397, 0.405, 0.424, 0.456],
             12: {1: 16.7, 2: 17.2, 3: 17.5, 4: 17.5},
@@ -99,7 +99,7 @@ MODELS = [
         # model id 8
         "MODEL_NAME": "lang_detection",
         "MODEL_SIZE": 1621000,           # in kB
-        "MAX_BATCH_SIZE": 8,
+        "MAX_BATCH_SIZE": 4,
         "MIG_BATCH_EXEC_TIMES": {
             24: {1: 6.3, 2: 7.4, 3: 12.2, 4: 24.1},
             12: {1: 6.3, 2: 7.4, 3: 12.2, 4: 24.1}
@@ -110,8 +110,8 @@ MODELS = [
         # model id 9
         "MODEL_NAME": "lang_translation",
         "MODEL_SIZE": 2000000,             # in kB
-        "MAX_BATCH_SIZE": 2,
-        "MIG_BATCH_EXEC_TIMES": {24: {1: 183.3, 2: 274.9}},
+        "MAX_BATCH_SIZE": 1,
+        "MIG_BATCH_EXEC_TIMES": {24: {1: 549.9}},
         "EXEC_TIME_CVS": {6: 0.5, 12: 0.5, 24: 0.5}
     },
     {
@@ -186,7 +186,8 @@ MODELS = [
         "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
     },
     {
-        # model id 17 — artificial fast copy of lang_translation (model 9) at 0.4x exec time
+        # model id 17 — artificial fast variant of lang_translation (model 9),
+        # at roughly 0.1x its batch size 1 exec time, and batching to 2
         "MODEL_NAME": "lang_translation_fast",
         "MODEL_SIZE": 2000000,             # in kB
         "MAX_BATCH_SIZE": 2,

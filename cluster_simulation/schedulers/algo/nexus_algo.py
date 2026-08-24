@@ -38,8 +38,56 @@ class NexusSLOSplitter:
 
 
     @classmethod
+    def get_task_worker_sizes(cls, workflow: Workflow, workers: dict,
+                              time: float = 0) -> dict[int, int]:
+        """Returns the worker memory size (GB) each task's batch exec times should
+        be read from.
+
+        A task can be dispatched to any worker hosting its model, and the same model
+        runs at different speeds on different MIG partition sizes, so the split is
+        planned against the slowest partition the model is actually placed on.
+
+        Args:
+            workflow: Workflow whose tasks to find worker sizes for
+            workers: Map of worker ID -> worker object
+            time: Time at which to read model placements
+
+        Returns:
+            task_worker_sizes: Task ID -> worker memory size to profile against (GB)
+        """
+        task_worker_sizes = {}
+        for task in workflow.tasks.values():
+            placed_sizes = {
+                w.total_memory_gb for w in workers.values()
+                if any(s.model.data.id == task.model_data.id
+                       for s in w.GPU_state.state_at(time))}
+            profiled_sizes = placed_sizes & set(task.model_data.batch_exec_times.keys())
+
+            assert(profiled_sizes), \
+                (f"Model {task.model_data.id} has no batch exec times profiled for "
+                 f"any worker size it is placed on ({sorted(placed_sizes)})")
+
+            task_worker_sizes[task.id] = max(
+                profiled_sizes, key=lambda ws: task.model_data.batch_exec_times[ws][1])
+
+        return task_worker_sizes
+
+
+    @classmethod
+    def _max_feasible_batch_size(cls, model_data, worker_size: int, budget: float) -> int:
+        """Returns the largest batch of [model_data] that runs within [budget] on a
+        worker of [worker_size], falling back to 1 when even that does not fit.
+        """
+        feasible = [b for b in range(1, model_data.max_batch_size + 1)
+                    if model_data.batch_exec_times[worker_size][b] <= budget]
+
+        return max(feasible) if feasible else 1
+
+
+    @classmethod
     def generate_task_slos(cls, workflow: Workflow, slo: float,
-                           task_arrival_rates: dict[int, float]) -> dict[int, tuple[float, int]]:
+                           task_arrival_rates: dict[int, float],
+                           task_worker_sizes: dict[int, int]) -> dict[int, tuple[float, int]]:
         """Split job SLO over workflow tasks.
 
         Args:
@@ -47,6 +95,8 @@ class NexusSLOSplitter:
             slo: Job-level SLO to split across tasks (ms)
             task_arrival_rates: Task ID -> per worker arrival rate (qps), as
             produced by [get_task_arrival_rates]
+            task_worker_sizes: Task ID -> worker memory size whose batch exec times
+            to plan against (GB), as produced by [get_task_worker_sizes]
 
         Returns:
             task_slos: (SLO, max batch size) for each task ID in workflow
@@ -66,15 +116,17 @@ class NexusSLOSplitter:
         assert(len(final_tasks) == 1) # NOTE: algorithm is for fork-join graphs
         final_task = final_tasks[0]
 
-        def _min_gpu_single(model, req_rate, k):
-            bsizes = [b for b in range(1, model.max_batch_size + 1) if model.batch_exec_times[24][b] <= k]
+        def _min_gpu_single(model, req_rate, k, worker_size):
+            exec_times = model.batch_exec_times[worker_size]
+            bsizes = [b for b in range(1, model.max_batch_size + 1) if exec_times[b] <= k]
             if not bsizes:
                 return np.inf
-            return min([req_rate * model.batch_exec_times[24][bsize] / bsize / 1000 for bsize in bsizes])
+            return min([req_rate * exec_times[bsize] / bsize / 1000 for bsize in bsizes])
 
         for t in range(TIME_STEP, slo + 1, TIME_STEP):
             min_gpus[final_task.id][t] = min(
-                [(k, _min_gpu_single(final_task.model_data, task_arrival_rates[final_task.id], k)) 
+                [(k, _min_gpu_single(final_task.model_data, task_arrival_rates[final_task.id], k,
+                                     task_worker_sizes[final_task.id]))
                  for k in range(TIME_STEP, t + 1, TIME_STEP)],
                 key=lambda x: x[1])
         
@@ -86,7 +138,8 @@ class NexusSLOSplitter:
                 for t in range(TIME_STEP, slo + 1, TIME_STEP):
                     min_gpus[task.id][t] = min(
                         [(k, 
-                          _min_gpu_single(task.model_data, task_arrival_rates[task.id], k) + \
+                          _min_gpu_single(task.model_data, task_arrival_rates[task.id], k,
+                                          task_worker_sizes[task.id]) + \
                           (np.inf if t - k < TIME_STEP else
                            min(sum(min_gpus[v.id][t_prime][1] for v in task.next_tasks)
                                for t_prime in range(TIME_STEP, t - k + 1, TIME_STEP))))
@@ -120,10 +173,10 @@ class NexusSLOSplitter:
                         f"{workflow.id}: no budget left for task {task.id}")
 
                 task_slo = min_gpus[task.id][subtree_slo][0]
-                feasible_bsizes = [b for b in range(1, task.model_data.max_batch_size + 1)
-                                   if task.model_data.batch_exec_times[24][b] <= task_slo]
-
-                slos[task.id] = (task_slo, max(feasible_bsizes) if feasible_bsizes else 1)
+                slos[task.id] = (task_slo,
+                                 cls._max_feasible_batch_size(task.model_data,
+                                                              task_worker_sizes[task.id],
+                                                              task_slo))
                 consumed[task.id] = spent + task_slo
 
                 next_ready.extend([t for t in task.next_tasks
@@ -132,6 +185,26 @@ class NexusSLOSplitter:
             ready = next_ready
 
         assert(len(slos) == len(workflow.tasks))
+
+        # The DP stops buying budget as soon as a stage's GPU cost bottoms out, which
+        # can leave most of the job SLO handed to no stage at all: in Nexus the
+        # leftover is reclaimed downstream, where the bin packer spends a stage's
+        # budget on the largest batch that fits it, but nothing here reclaims it.
+        # Scale every stage by the same factor so the longest root to leaf path lands
+        # on the job SLO, keeping the proportions the DP chose but spending all of it.
+        critical_path = max(consumed.values())
+        assert(critical_path <= slo)
+
+        if critical_path > 0 and critical_path < slo:
+            scale = slo / critical_path
+            for tid, (task_slo, _) in slos.items():
+                # keep stage budgets on the DP's TIME_STEP grid, rounding down so the
+                # scaled path cannot overshoot the job SLO
+                scaled_slo = int(task_slo * scale) // TIME_STEP * TIME_STEP
+                slos[tid] = (scaled_slo,
+                             cls._max_feasible_batch_size(workflow.tasks[tid].model_data,
+                                                          task_worker_sizes[tid],
+                                                          scaled_slo))
 
         return slos
 
