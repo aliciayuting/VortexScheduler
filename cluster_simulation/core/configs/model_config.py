@@ -185,13 +185,4 @@ MODELS = [
         },
         "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
     },
-    {
-        # model id 17 — artificial fast variant of lang_translation (model 9),
-        # at roughly 0.1x its batch size 1 exec time, and batching to 2
-        "MODEL_NAME": "lang_translation_fast",
-        "MODEL_SIZE": 2000000,             # in kB
-        "MAX_BATCH_SIZE": 2,
-        "MIG_BATCH_EXEC_TIMES": {24: {1: 54.9, 2: 82}},
-        "EXEC_TIME_CVS": {6: 0.5, 12: 0.5, 24: 0.5}
-    },
 ]

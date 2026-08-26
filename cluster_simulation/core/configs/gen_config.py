@@ -43,6 +43,19 @@ MAX_NUM_MODELS_PER_NODE = 4
 # arrivals more tightly than Poisson does, below 1 spreads them more evenly.
 
 CLIENT_CONFIGS = [
+    # WF6 (textvision)
+    {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+                      "PHASES": [{"KIND": "CONSTANT", "RATE": 120, "NUM_JOBS": 20000}]},
+         "SLO": int(62.48 * 5)}},
+
+    # WF6 (textvision) with spike
+    # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "BURST", "RATE": 100, "BURST_RATE": 175,
+    #                               "QUIET_DURATION": 15000, "BURST_DURATION": 3000,
+    #                               "STOCHASTIC": False, "DURATION": 162000},
+    #                              {"KIND": "CONSTANT", "RATE": 100, "DURATION": 17750}]},
+    #      "SLO": int(62.48 * 5)}},
+
     # WF6/7/8 (textvision variants)
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 40, "NUM_JOBS": 5000}]},
@@ -55,24 +68,24 @@ CLIENT_CONFIGS = [
     #      "SLO": int(80.48 * 5)}},
 
     # WF6/7/8 (textvision variants) with spike
-    {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-                      "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
-                                  "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
-                                  "STOCHASTIC": True, "DURATION": 40000},
-                                 {"KIND": "CONSTANT", "RATE": 35, "DURATION": 80000}]},
-         "SLO": int(62.48 * 5)}},
-    {7: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-                      "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
-                                  "QUIET_DURATION": 60000, "BURST_DURATION": 10000,
-                                  "STOCHASTIC": True, "DURATION": 70000},
-                                 {"KIND": "CONSTANT", "RATE": 35, "DURATION": 50000}]},
-         "SLO": int(70.48 * 5)}},
-    {8: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-                      "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
-                                  "QUIET_DURATION": 90000, "BURST_DURATION": 10000,
-                                  "STOCHASTIC": True, "DURATION": 100000},
-                                 {"KIND": "CONSTANT", "RATE": 35, "DURATION": 20000}]},
-         "SLO": int(80.48 * 5)}},
+    # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
+    #                               "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
+    #                               "STOCHASTIC": True, "DURATION": 40000},
+    #                              {"KIND": "CONSTANT", "RATE": 35, "DURATION": 80000}]},
+    #      "SLO": int(62.48 * 5)}},
+    # {7: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
+    #                               "QUIET_DURATION": 60000, "BURST_DURATION": 10000,
+    #                               "STOCHASTIC": True, "DURATION": 70000},
+    #                              {"KIND": "CONSTANT", "RATE": 35, "DURATION": 50000}]},
+    #      "SLO": int(70.48 * 5)}},
+    # {8: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
+    #                               "QUIET_DURATION": 90000, "BURST_DURATION": 10000,
+    #                               "STOCHASTIC": True, "DURATION": 100000},
+    #                              {"KIND": "CONSTANT", "RATE": 35, "DURATION": 20000}]},
+    #      "SLO": int(80.48 * 5)}},
 
     # WF6/10/11 (textvision variants swapped)
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -105,58 +118,49 @@ CLIENT_CONFIGS = [
     #                               {"KIND": "CONSTANT", "RATE": 35, "DURATION": 20000}]},
     #       "SLO": int(80.48 * 5)}},
 
+    # WF1 (ppl2)
+    # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 40, "NUM_JOBS": 20000}]},
+    #      "SLO": int(186.3 * 5)}},
+
+    # WF1 (ppl2) with repeated spikes
+    # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "BURST", "RATE": 30, "BURST_RATE": 80,
+    #                               "QUIET_DURATION": 30000, "BURST_DURATION": 5000,
+    #                               "STOCHASTIC": False, "DURATION": 490000},
+    #                              {"KIND": "CONSTANT", "RATE": 30, "DURATION": 60000}]},
+    #      "SLO": int(186.3 * 5)}},
+
     # WF1/4/5 (multitenant ppl 2)
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 9, "NUM_JOBS": 5000}]},
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 14, "NUM_JOBS": 5000}]},
     #      "SLO": int(186.3 * 5)}},
     # {4: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 9, "NUM_JOBS": 5000}]},
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 10, "NUM_JOBS": 5000}]},
     #      "SLO": int(725.2 * 5)}},
     # {5: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 9, "NUM_JOBS": 5000}]},
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 12, "NUM_JOBS": 5000}]},
     #      "SLO": int(326.7 * 5)}},
 
     # WF1/4/5 (multitenant ppl 2) with spike
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "BURST", "RATE": 5, "BURST_RATE": 17,
-    #                               "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
-    #                               "STOCHASTIC": False, "DURATION": 40000},
-    #                              {"KIND": "CONSTANT", "RATE": 5, "DURATION": 80000}]},
+    #                   "PHASES": [{"KIND": "BURST", "RATE": 7, "BURST_RATE": 24,
+    #                               "QUIET_DURATION": 160000, "BURST_DURATION": 30000,
+    #                               "STOCHASTIC": False, "DURATION": 190000},
+    #                              {"KIND": "CONSTANT", "RATE": 7, "DURATION": 450000}]},
     #      "SLO": int(186.3 * 5)}},
     # {4: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "BURST", "RATE": 5, "BURST_RATE": 17,
-    #                               "QUIET_DURATION": 60000, "BURST_DURATION": 10000,
-    #                               "STOCHASTIC": False, "DURATION": 70000},
-    #                              {"KIND": "CONSTANT", "RATE": 5, "DURATION": 50000}]},
+    #                   "PHASES": [{"KIND": "BURST", "RATE": 7, "BURST_RATE": 24,
+    #                               "QUIET_DURATION": 320000, "BURST_DURATION": 30000,
+    #                               "STOCHASTIC": False, "DURATION": 350000},
+    #                              {"KIND": "CONSTANT", "RATE": 7, "DURATION": 290000}]},
     #      "SLO": int(725.2 * 5)}},
     # {5: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "BURST", "RATE": 5, "BURST_RATE": 17,
-    #                               "QUIET_DURATION": 90000, "BURST_DURATION": 10000,
-    #                               "STOCHASTIC": False, "DURATION": 100000},
-    #                              {"KIND": "CONSTANT", "RATE": 5, "DURATION": 20000}]},
+    #                   "PHASES": [{"KIND": "BURST", "RATE": 7, "BURST_RATE": 24,
+    #                               "QUIET_DURATION": 480000, "BURST_DURATION": 30000,
+    #                               "STOCHASTIC": False, "DURATION": 510000},
+    #                              {"KIND": "CONSTANT", "RATE": 7, "DURATION": 130000}]},
     #      "SLO": int(326.7 * 5)}},
-
-    # WF12/13/14 (flmr-shared)
-    # {12: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 44, "NUM_JOBS": 5000}]},
-    #       "SLO": int(24.05 * 5)}},
-    # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 72, "NUM_JOBS": 5000}]},
-    #       "SLO": int(47.75 * 5)}},
-    # {14: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 12, "NUM_JOBS": 5000}]},
-    #       "SLO": int(108.25 * 5)}},
-
-    # WF15/16/17 (search_1-shared)
-    # {15: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 28, "NUM_JOBS": 5000}]},
-    #       "SLO": int(124.0 * 5)}},
-    # {16: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 28, "NUM_JOBS": 5000}]},
-    #       "SLO": int(125.56 * 5)}},
-    # {17: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 28, "NUM_JOBS": 5000}]},
-    #       "SLO": int(124.0 * 5)}},
 ]
 
 DEFAULT_ARRIVAL_PROCESS = "POISSON"  # CONSTANT | POISSON | GAMMA
@@ -231,19 +235,33 @@ AUTOSCALING_POLICY = "NONE"
 # HERD | CUSTOM | INFERLINE
 ALLOCATION_STRATEGY = "CUSTOM"
 
-# WF6/10/11 alloc (textvision variants)
+# WF6 alloc (textvision)
 CUSTOM_ALLOCATION = [
     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
-    (6, [14]), (6, [15]), (6, [16]), (6, [])
+    (6, [14]), (6, []), (6, []), (6, [])
 ]
 
-# 10-node multitenant ppl 2 (3 versions) alloc
+# WF6/10/11 alloc (textvision variants)
 # CUSTOM_ALLOCATION = [
-#     (12, [4]), (6, [5,13]), (6, [5,13]),
-#     (12, [6]), (12, [6]),
+#     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
+#     (6, [14]), (6, [15]), (6, [16]), (6, [])
+# ]
+
+# WF1 alloc (ppl2)
+# CUSTOM_ALLOCATION = [
+#     (12, [4]), (12, [5, 6]),
 #     (12, [7]), (12, [7]),
 #     (12, [7]), (12, [7]),
-#     (12, [8]), (12, [8]),
+#     (12, [7]), (12, [7])
+# ]
+
+# 12-node multitenant ppl 2 (3 versions) alloc
+# CUSTOM_ALLOCATION = [
+#     (12, [4]), (12, [6]),
+#     (12, [7]), (12, [7]),
+#     (12, [7]), (12, [7]),
+#     (12, [8]), (6, [5]), (6, [13]),
+#     (24, [9]),
 #     (24, [9]),
 #     (24, [9]),
 #     (24, [9]),
@@ -251,30 +269,6 @@ CUSTOM_ALLOCATION = [
 #     (24, [10]),
 #     (24, [10]),
 #     (24, [10])
-# ]
-
-# flmr-shared workflows (WF12/13/14) alloc
-# CUSTOM_ALLOCATION = [
-#     (6, [2]),
-#     (6, [5, 14]),
-#     (6, [5]),
-#     (6, [0, 12]),
-#     (6, [0]),
-#     (6, [12]),
-#     (6, [15]),
-#     (6, [11]),
-#     (24, [8, 11]),
-#     (24, [17]),
-#     (24, [17]),
-# ]
-
-# search_1-shared workflows (WF15/16/17) alloc
-# CUSTOM_ALLOCATION = [
-#     (12, [4]), (12, [4]),
-#     (12, [4]), (12, [4]),
-#     (6, [11]), (6, [11]), (6, [11]), (6, [11]),
-#     (12, [6]), (12, [6]), (12, [6]),
-#     (6, [5, 3]), (6, [12, 0]),
 # ]
 
 # ppl1 4 node alloc:

@@ -170,7 +170,7 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
     loaded_srcs, max_res = _load_sources(srcs, need_job_sizes=normalize_by_job_size)
 
     if normalize_by_job_size:
-        thresholds = np.linspace(0, 8, 200)
+        thresholds = np.linspace(0, 10, 250)
         xlabel = "Response time as multiple of job size"
     else:
         thresholds = np.arange(0, max_res, 1)
