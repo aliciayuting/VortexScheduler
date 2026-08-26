@@ -58,7 +58,7 @@ MODELS = [
         # model id 4
         "MODEL_NAME": "audio_det",
         "MODEL_SIZE": 6093000,      # in kB
-        "MAX_BATCH_SIZE": 8,
+        "MAX_BATCH_SIZE": 4,
         "MIG_BATCH_EXEC_TIMES": {
             24: {1: 65.0, 2: 68.0, 3: 69.4, 4: 72.1},
             12: {1: 65.0, 2: 68.0, 3: 69.4, 4: 72.1} # TODO: update with real nums
@@ -69,7 +69,7 @@ MODELS = [
         # model id 5
         "MODEL_NAME": "encode_search-ivf",
         "MODEL_SIZE": 1210000,       # in kB
-        "MAX_BATCH_SIZE": 8,
+        "MAX_BATCH_SIZE": 4,
         "MIG_BATCH_EXEC_TIMES": {
             24: {1: 16.7, 2: 17.2, 3: 17.5, 4: 17.5}, # TODO [0.397, 0.405, 0.424, 0.456],
             12: {1: 16.7, 2: 17.2, 3: 17.5, 4: 17.5},
@@ -99,7 +99,7 @@ MODELS = [
         # model id 8
         "MODEL_NAME": "lang_detection",
         "MODEL_SIZE": 1621000,           # in kB
-        "MAX_BATCH_SIZE": 8,
+        "MAX_BATCH_SIZE": 4,
         "MIG_BATCH_EXEC_TIMES": {
             24: {1: 6.3, 2: 7.4, 3: 12.2, 4: 24.1},
             12: {1: 6.3, 2: 7.4, 3: 12.2, 4: 24.1}
@@ -110,8 +110,8 @@ MODELS = [
         # model id 9
         "MODEL_NAME": "lang_translation",
         "MODEL_SIZE": 2000000,             # in kB
-        "MAX_BATCH_SIZE": 2,
-        "MIG_BATCH_EXEC_TIMES": {24: {1: 183.3, 2: 274.9}},
+        "MAX_BATCH_SIZE": 1,
+        "MIG_BATCH_EXEC_TIMES": {24: {1: 549.9}},
         "EXEC_TIME_CVS": {6: 0.5, 12: 0.5, 24: 0.5}
     },
     {
@@ -184,13 +184,5 @@ MODELS = [
             6: {1: 20.0, 2: 22.0, 3: 23.9, 4: 25.9, 5: 27.9, 6: 29.9, 7: 31.8, 8: 33.8, 9: 35.8, 10: 37.7, 11: 39.7, 12: 41.7, 13: 43.7, 14: 45.6, 15: 47.6, 16: 49.6, 17: 51.5, 18: 53.5, 19: 55.5, 20: 57.5, 21: 59.4, 22: 61.4, 23: 63.4, 24: 65.3, 25: 67.3, 26: 69.3, 27: 71.3, 28: 73.2, 29: 75.2, 30: 77.2, 31: 79.1, 32: 81.1}
         },
         "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
-    },
-    {
-        # model id 17 — artificial fast copy of lang_translation (model 9) at 0.4x exec time
-        "MODEL_NAME": "lang_translation_fast",
-        "MODEL_SIZE": 2000000,             # in kB
-        "MAX_BATCH_SIZE": 2,
-        "MIG_BATCH_EXEC_TIMES": {24: {1: 54.9, 2: 82}},
-        "EXEC_TIME_CVS": {6: 0.5, 12: 0.5, 24: 0.5}
     },
 ]

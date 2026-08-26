@@ -13,6 +13,18 @@ class BoostPolicy:
     RELATIVE_LAXITY = 4
 
 
+def get_min_exec_time(model_data) -> float:
+    """Returns the batch size 1 execution time of [model_data] on the slowest MIG
+    partition size it is profiled for.
+
+    The same model runs at different speeds on different partition sizes, and
+    callers here reason about work that has not been dispatched yet, so they cannot
+    know which size a task will land on. Assuming the slowest one keeps estimates of
+    remaining work from running short.
+    """
+    return max(times[1] for times in model_data.batch_exec_times.values())
+
+
 def _get_processing_time(job: Job, complete_task_ids: set[int]) -> float:
     dependencies: dict[int, set[int]] = {}
     dependents: dict[int, set[int]] = {}
@@ -31,7 +43,7 @@ def _get_processing_time(job: Job, complete_task_ids: set[int]) -> float:
         # Do we include things like GPU_to_GPU_delay? Does it make sense to
         # use execution_time from a previous run to start?
         max_cum_processing_time += max([
-            task.model_data.batch_exec_times[24][1] for task in available_tasks
+            get_min_exec_time(task.model_data) for task in available_tasks
         ])
         for task in available_tasks:
             for dep in dependents[task.task_id]:

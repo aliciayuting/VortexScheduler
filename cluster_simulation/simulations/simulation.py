@@ -7,6 +7,8 @@ import core.configs.model_config as mcfg
 
 from core.data_models.workflow import Workflow
 from core.data_models.model_data import ModelData
+from core.workload import (get_client_workloads, get_workflow_peak_rates,
+                           get_workflow_slos)
 
 from client.client import Client
 from network.network import Network
@@ -17,6 +19,7 @@ from workers.worker import Worker
 
 from core.allocation import ModelAllocation
 from schedulers.algo.vortex_planner_algo import VortexPlanner
+from schedulers.algo.nexus_algo import NexusSLOSplitter
 
 from verifiers.live_verifier import LiveVerifier
 from verifiers.log_verifier import LogVerifier
@@ -43,6 +46,8 @@ class Simulation:
 
         self.allocation = self._generate_model_allocation()
         self.workers = self._generate_workers()
+
+        self._assign_nexus_task_slos()
 
         self.scheduler = None
         scheduler_worker_id = None
@@ -87,21 +92,15 @@ class Simulation:
         """
         clients: list[Client] = []
         created_job_count = 0
-        for cfg in gcfg.CLIENT_CONFIGS:
-            for wid, cfgw in cfg.items():
-                clients.append(Client(uuid4(), self.em))
+        for wid, workload, slo in get_client_workloads():
+            client = Client(uuid4(), self.em)
+            clients.append(client)
 
-                prev_create_time = 0
-                for i, send_rate in enumerate(cfgw["SEND_RATES"]):
-                    n_jobs = cfgw["JOBS_PER_SEND_RATE"][i]
-                    prev_create_time = clients[-1].generate_jobs(
-                        self.workflows[wid], 
-                        n_jobs, 
-                        prev_create_time, 
-                        send_rate,
-                        cfgw["SLO"],
-                        created_job_count)
-                    created_job_count += n_jobs
+            client.generate_jobs(self.workflows[wid], workload, 0, slo, created_job_count)
+
+            # job IDs are global, so the next client picks up where this one left off
+            created_job_count += len(client.jobs)
+
         return clients
     
 
@@ -172,6 +171,33 @@ class Simulation:
                                                 slo)
 
 
+    def _assign_nexus_task_slos(self):
+        """Splits each configured workflow's job SLO across its pipeline stages,
+        giving every task its own deadline. Runs once at setup, after model
+        placement is known, since the split depends on how many workers host each
+        model. No-op unless SLO_TYPE is NEXUS.
+
+        One Workflow object is shared by every client sending it, so the split is
+        planned for the heaviest load that workflow can see: the sum of its
+        clients' peak send rates.
+        """
+        if gcfg.SLO_TYPE != "NEXUS":
+            return
+
+        peak_rates = get_workflow_peak_rates()
+        slos = get_workflow_slos()
+
+        for wid, workflow in self.workflows.items():
+            arrival_rates = NexusSLOSplitter.get_task_arrival_rates(
+                workflow, peak_rates[wid], self.workers)
+            worker_sizes = NexusSLOSplitter.get_task_worker_sizes(workflow, self.workers)
+
+            workflow.assign_task_slos(
+                NexusSLOSplitter.generate_task_slos(
+                    workflow, slos[wid], arrival_rates, worker_sizes),
+                slos[wid])
+
+
     def _generate_workers(self) -> dict[UUID, Worker]:
         """Generates and initializes model placements for initial worker objects.
 
@@ -213,6 +239,8 @@ class Simulation:
             self.em.event_log.to_csv(os.path.join(self.out_path, "event_log.csv"))
         
         self._produce_agent_keys()
+        self._produce_nexus_slo_split_log()
+        self._produce_admission_control_log()
 
         if gcfg.ENABLE_LIVE_VERIFICATION:
             self.verifier.verify_on_sim_end()
@@ -234,6 +262,47 @@ class Simulation:
         worker_log.to_csv(os.path.join(self.out_path, "worker_config_log.csv"))
         self.worker_config_log = worker_log
         # TODO: client log
+
+
+    def _produce_admission_control_log(self):
+        """Writes what admission control did to each workflow: the capacity it
+        estimated, the rate and burst size it allowed, and how many jobs it turned
+        away.
+        """
+        stats = self.scheduler.admission_controller.get_stats()
+        pd.DataFrame(stats).to_csv(os.path.join(self.out_path, "admission_control.csv"))
+
+
+    def _produce_nexus_slo_split_log(self):
+        """Writes the per-stage SLO split that NexusSLOSplitter produced for each
+        workflow. No-op unless SLO_TYPE is NEXUS, since no split exists otherwise.
+        """
+        if gcfg.SLO_TYPE != "NEXUS":
+            return
+
+        slo_df = pd.DataFrame(columns=["workflow_id", "task_id", "model_id", "job_slo",
+                                       "task_slo", "task_deadline_offset",
+                                       "max_batch_size", "worker_size", "min_exec_time"])
+        for workflow in sorted(self.workflows.values(), key=lambda w: w.id):
+            if not workflow.task_deadline_offsets:
+                continue
+
+            worker_sizes = NexusSLOSplitter.get_task_worker_sizes(workflow, self.workers)
+
+            for task_id, task in sorted(workflow.tasks.items()):
+                slo_df.loc[len(slo_df)] = {
+                    "workflow_id": workflow.id,
+                    "task_id": task_id,
+                    "model_id": task.model_data.id,
+                    "job_slo": workflow.job_slo,
+                    "task_slo": workflow.task_slos[task_id],
+                    "task_deadline_offset": workflow.task_deadline_offsets[task_id],
+                    "max_batch_size": workflow.task_max_batch_sizes[task_id],
+                    "worker_size": worker_sizes[task_id],
+                    "min_exec_time": task.model_data.batch_exec_times[worker_sizes[task_id]][1]
+                }
+
+        slo_df.to_csv(os.path.join(self.out_path, "nexus_slo_split.csv"))
 
 
     def _postprocess_nonexec_delays(self):

@@ -218,6 +218,10 @@ class Logger(EventListener):
 
         elif event.type.id == EventIds.JOBS_DROPPED:
             for job_id in event.kwargs["job_ids"]:
+                # a job may be dropped by several agents at once; keep the first drop
+                if job_id not in self.unfinished_jobs:
+                    continue
+
                 self.unfinished_jobs.remove(job_id)
                 for key in self._job_task_keys.get(job_id, []):
                     self._task_log_rows[self._task_idx[key]]["dropped_timestamp"] = event.time

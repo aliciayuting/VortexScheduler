@@ -23,11 +23,9 @@ from events.event_types import *
 
 class ShepherdScheduler(Scheduler):
 
-    def __init__(self, em: EventManager, workers: dict[UUID, Worker], workflows: list[Workflow], scheduler_worker_id: UUID):
-        super().__init__(em)
+    def __init__(self, em: EventManager, workers: dict[UUID, Worker], workflows: dict[int, Workflow], scheduler_worker_id: UUID):
+        super().__init__(em, workers, workflows)
 
-        self.workers = workers
-        self.workflows = workflows
         self.scheduler_worker_id = scheduler_worker_id
 
         # (worker ID, instance ID) -> list[(job ID, task ID)] to record scheduling decisions
@@ -113,6 +111,9 @@ class ShepherdScheduler(Scheduler):
     def _schedule_instance_if_idle(self, time: float, worker_id: UUID, instance_id: UUID, ignore_transfer_time: bool):
         worker = self.workers[worker_id]
         instance_state = worker.GPU_state.get_instance_state(instance_id, time)
+
+        # drop queued jobs that can no longer meet their deadline
+        self._drop_queued_jobs(time, self.queues[instance_state.model.data.id])
 
         # skip if queue is empty
         if self.queues[instance_state.model.data.id].qsize() == 0:

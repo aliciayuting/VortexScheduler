@@ -17,11 +17,8 @@ from events.event_types import *
 
 class DecentralRoundRobinScheduler(Scheduler):
 
-    def __init__(self, em: EventManager, workers: dict[UUID, Worker], workflows: list[Workflow]):
-        super().__init__(em)
-
-        self.workers = workers
-        self.workflows = workflows
+    def __init__(self, em: EventManager, workers: dict[UUID, Worker], workflows: dict[int, Workflow]):
+        super().__init__(em, workers, workflows)
 
         # (job ID, task ID) -> worker ID on which task result/output is stored
         self.output_locs: dict[tuple[int, int], UUID] = {}
@@ -99,6 +96,11 @@ class DecentralRoundRobinScheduler(Scheduler):
         for task in batch.tasks:
             assert((task.job.id, task.task_id) not in self.output_locs)
             self.output_locs[(task.job.id, task.task_id)] = worker_id
+
+            # workers drop for decentralized schedulers; do not dispatch further
+            # stages of a job that was already dropped
+            if task.job.id in self.dropped_job_ids:
+                continue
 
             for next_task_id in task.next_task_ids:
                 # if next task was already scheduled, send outputs to assigned worker

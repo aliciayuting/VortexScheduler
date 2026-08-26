@@ -4,6 +4,8 @@ from queue import PriorityQueue
 from queue_management.queued_task import QueuedTask
 from queue_management.batching import TaskBatcher
 
+from schedulers.algo.drop_algo import drop_from_queue, scheduler_manages_queues
+
 from events.event_manager import EventManager
 from events.event import *
 from events.event_types import *
@@ -53,6 +55,13 @@ class Worker(EventListener):
             EVENT_TYPES[EventIds.RESPONSE_SENT_TO_CLIENT]
         })
 
+        # drop where the queues are: workers drop unless the scheduler queues and
+        # batches tasks itself, in which case it drops before forming a batch
+        self.drops_at_worker = not scheduler_manages_queues()
+
+        # jobs known to be dropped, by this worker or by any other agent
+        self.dropped_job_ids: set[int] = set()
+
         self.queues: dict[int, PriorityQueue] = {}
         self.completed_tasks: dict[tuple[int, int], Task] = {}
         self.scheduled_task_to_worker: dict[tuple[int, int], UUID] = {} # (job ID, task ID) -> worker ID
@@ -96,6 +105,7 @@ class Worker(EventListener):
             self.on_outputs_arrival(event.time, event.kwargs["tasks"])
         
         elif event.type.id == EventIds.JOBS_DROPPED:
+            self.dropped_job_ids.update(event.kwargs["job_ids"])
             self._drop_tasks(event.kwargs["job_ids"])
 
         elif event.type.id == EventIds.CHECK_QUEUE_AT_WORKER:
@@ -154,6 +164,8 @@ class Worker(EventListener):
         arrived on the worker, add the tasks to a queue and attempt to execute 
         batch(es) if there are idle model instances.
         """
+        tasks = [t for t in tasks if t.job.id not in self.dropped_job_ids]
+
         for task in tasks:
             if task.model_data.id not in self.queues:
                 self.queues[task.model_data.id] = PriorityQueue()
@@ -197,6 +209,10 @@ class Worker(EventListener):
         """
         ready_tasks_for_worker_queue = []
         for task in tasks:
+            # outputs already in flight when the job was dropped
+            if task.job.id in self.dropped_job_ids:
+                continue
+
             assert((task.job.id, task.task_id) in self.awaiting_dep_to_task)
 
             waiting_task = self.awaiting_dep_to_task[(task.job.id, task.task_id)]
@@ -229,6 +245,8 @@ class Worker(EventListener):
         """Remove all tasks associated with given jobs from queues. Does not
         affect executing batches.
         """
+        job_ids = set(job_ids)
+
         for q in self.queues.values():
             filtered = []
             while q.qsize() > 0:
@@ -238,8 +256,47 @@ class Worker(EventListener):
 
             for qt in filtered: q.put(qt)
 
+        # forget dependencies awaited by dropped tasks. Tasks already committed to
+        # an assigned batch are left alone, since dropping part of a formed batch
+        # would strand the rest of it waiting forever.
+        stranded = [t for t in self.awaiting_task_to_deps
+                    if t.job.id in job_ids and t not in self.awaiting_task_to_batch]
+        for task in stranded:
+            for rt in self.awaiting_task_to_deps.pop(task):
+                self.awaiting_dep_to_task.pop((task.job.id, rt), None)
+
+
+    def _drop_undeliverable_jobs(self, time: float, model_id: int):
+        """Drops queued jobs that the configured drop policy rejects at [time],
+        and announces them to the rest of the cluster. No-op when the scheduler
+        owns the queues and drops there instead.
+
+        Args:
+            time: Time at which the drop decision is made
+            model_id: Model whose queue should be filtered
+        """
+        if not self.drops_at_worker or gcfg.DROP_POLICY == "NONE":
+            return
+
+        if model_id not in self.queues:
+            return
+
+        newly_dropped = drop_from_queue(time, self.queues[model_id], self.dropped_job_ids,
+                                        self.total_memory_gb)
+        if not newly_dropped:
+            return
+
+        self.dropped_job_ids.update(newly_dropped)
+        self.em.add_event(
+            Event(time,
+                  EVENT_TYPES[EventIds.JOBS_DROPPED],
+                  kwargs={"job_ids": newly_dropped}),
+            self.emitter_id)
+
 
     def on_check_queue(self, time: float, model_id: int):
+        self._drop_undeliverable_jobs(time, model_id)
+
         # if no tasks queued, do nothing
         if model_id not in self.queues or self.queues[model_id].qsize() == 0:
             return
@@ -276,6 +333,11 @@ class Worker(EventListener):
             task.job.set_completion_time(time, task.task_id)
             self.completed_tasks[(task.job.id, task.task_id)] = task
 
+            # the job was dropped while this task was executing, so its results
+            # are not worth forwarding
+            if task.job.id in self.dropped_job_ids:
+                continue
+
             # if central scheduler directed worker to send results, add to send batch
             if (task.job.id, task.task_id) in self.scheduled_task_to_worker:
                 next_worker_id = self.scheduled_task_to_worker[(task.job.id, task.task_id)]
@@ -306,7 +368,9 @@ class Worker(EventListener):
 
         # notify centralized scheduler of newly available tasks, but keep outputs on current worker
         if self.is_centralized:
-            all_available = [nt for task in batch.tasks for nt in task.job.newly_available_tasks(task)]
+            all_available = [nt for task in batch.tasks
+                             if task.job.id not in self.dropped_job_ids
+                             for nt in task.job.newly_available_tasks(task)]
             if all_available:
                 self.em.add_event(
                     Event(time, 
