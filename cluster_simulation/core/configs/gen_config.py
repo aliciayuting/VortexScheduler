@@ -44,9 +44,21 @@ MAX_NUM_MODELS_PER_NODE = 4
 
 CLIENT_CONFIGS = [
     # WF6 (textvision)
-    {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-                      "PHASES": [{"KIND": "CONSTANT", "RATE": 120, "NUM_JOBS": 20000}]},
+    # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 120, "NUM_JOBS": 20000}]},
+    #      "SLO": int(62.48 * 5)}},
+
+    # Real trace
+    {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
+                     "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
          "SLO": int(62.48 * 5)}},
+    {10: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
+                      "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
+          "SLO": int(70.48 * 5)}},
+    {11: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
+                      "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
+          "SLO": int(80.48 * 5)}},
+
 
     # WF6 (textvision) with spike
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -235,16 +247,16 @@ AUTOSCALING_POLICY = "NONE"
 # HERD | CUSTOM | INFERLINE
 ALLOCATION_STRATEGY = "CUSTOM"
 
-# WF6 alloc (textvision)
+# WF6/10/11 alloc (textvision variants)
 CUSTOM_ALLOCATION = [
     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
-    (6, [14]), (6, []), (6, []), (6, [])
+    (6, [14]), (6, [15]), (6, [16]), (6, [])
 ]
 
-# WF6/10/11 alloc (textvision variants)
+# WF6 alloc (older textvision-only placement; kept as commented fallback)
 # CUSTOM_ALLOCATION = [
 #     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
-#     (6, [14]), (6, [15]), (6, [16]), (6, [])
+#     (6, [14]), (6, []), (6, []), (6, [])
 # ]
 
 # WF1 alloc (ppl2)
