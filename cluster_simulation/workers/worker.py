@@ -25,11 +25,17 @@ class Worker(EventListener):
     _abandoned_batches = []
 
     def __init__(self, id: UUID, em: EventManager, total_memory_gb: int, create_time: float,
-                 is_centralized: bool):
+                 is_centralized: bool, load_view=None):
         super().__init__(Agent.WORKER)
 
         self.id = id
         self.em = em
+
+        # what the cluster has already accepted, for the load aware drop policies.
+        # A worker sees only its own queue, so this is the one way it can judge a
+        # job against the stages it has yet to reach. Set by the simulation, which
+        # shares one view between every worker and the scheduler
+        self.load_view = load_view
         self.is_centralized = is_centralized
         self.total_memory_gb = total_memory_gb
         self.create_time = create_time
@@ -296,7 +302,7 @@ class Worker(EventListener):
             return
 
         newly_dropped = drop_from_queue(time, self.queues[model_id], self.dropped_job_ids,
-                                        self.total_memory_gb)
+                                        self.total_memory_gb, self.load_view)
         if not newly_dropped:
             return
 
@@ -325,7 +331,8 @@ class Worker(EventListener):
             return
 
         newly_shadow_dropped = shadow_drops_from_queue(
-            time, self.queues[model_id], self.shadow_dropped_job_ids, self.total_memory_gb)
+            time, self.queues[model_id], self.shadow_dropped_job_ids,
+            self.total_memory_gb, self.load_view)
         if not newly_shadow_dropped:
             return
 

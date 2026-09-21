@@ -23,8 +23,10 @@ from events.event_types import *
 
 class ShepherdScheduler(Scheduler):
 
-    def __init__(self, em: EventManager, workers: dict[UUID, Worker], workflows: dict[int, Workflow], scheduler_worker_id: UUID):
-        super().__init__(em, workers, workflows)
+    def __init__(self, em: EventManager, workers: dict[UUID, Worker],
+                 workflows: dict[int, Workflow], scheduler_worker_id: UUID,
+                 load_view=None):
+        super().__init__(em, workers, workflows, load_view)
 
         self.scheduler_worker_id = scheduler_worker_id
 

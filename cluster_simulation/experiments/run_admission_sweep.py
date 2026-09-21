@@ -57,6 +57,13 @@ SWEEP_CONFIGS = {
                                "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
                                "ADMISSION_BURST_SIZE": None},
 
+    # the queue aware drop policy, which sheds a job once the work already in the
+    # cluster means its remaining stages cannot finish in time. Paired against
+    # central_rr_early, which asks the same question of an empty cluster
+    "central_rr_lookahead": {"DROP_POLICY": "LOOKAHEAD",
+                             "SLO_TYPE": "JOB_LEVEL",
+                             "ADMISSION_CONTROL_POLICY": "NONE"},
+
     # the same two token bucket configurations metered per pipeline stage rather
     # than per job: a task is discarded before it runs when its stage's bucket is
     # empty, which ends its job and wastes whatever it already spent upstream

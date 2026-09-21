@@ -13,6 +13,7 @@ from schedulers.algo.admission_algo import AdmissionController
 from schedulers.algo.drop_algo import (should_drop_task, should_shadow_drop_task,
                                        drop_from_queue, shadow_drops_from_queue,
                                        scheduler_manages_queues)
+from schedulers.algo.lookahead_algo import ClusterLoadView
 
 from events.event_manager import EventManager
 from events.event import *
@@ -22,12 +23,16 @@ from events.event_types import *
 class Scheduler(EventListener):
 
     def __init__(self, em: EventManager, workers: dict[UUID, Worker],
-                 workflows: dict[int, Workflow]):
+                 workflows: dict[int, Workflow], load_view: ClusterLoadView = None):
         super().__init__(Agent.SCHEDULER)
 
         self.em = em
         self.workers = workers
         self.workflows = workflows
+
+        # what the cluster has already accepted, for the load aware drop policies.
+        # Shared with the workers so that both sides judge against one view
+        self.load_view = load_view
 
         # drop where the queues are: a scheduler that queues and batches tasks
         # itself drops here, otherwise the workers own the queues and drop there
@@ -193,7 +198,7 @@ class Scheduler(EventListener):
             if task.job.id in self.dropped_job_ids or task.job.id in dropped:
                 continue
 
-            if should_drop_task(time, task):
+            if should_drop_task(time, task, load_view=self.load_view):
                 dropped.append(task.job.id)
 
         self._emit_drops(time, dropped)
@@ -213,7 +218,8 @@ class Scheduler(EventListener):
         if not self.drops_at_scheduler or gcfg.DROP_POLICY == "NONE":
             return set()
 
-        dropped = drop_from_queue(time, task_queue, self.dropped_job_ids)
+        dropped = drop_from_queue(time, task_queue, self.dropped_job_ids,
+                                  load_view=self.load_view)
         self._emit_drops(time, dropped)
         return set(dropped)
 
@@ -236,7 +242,7 @@ class Scheduler(EventListener):
             if task.job.id in self.shadow_dropped_job_ids or task.job.id in seen_here:
                 continue
 
-            if should_shadow_drop_task(time, task):
+            if should_shadow_drop_task(time, task, load_view=self.load_view):
                 seen_here.add(task.job.id)
                 shadow_dropped.append((task.job.id, task.task_id))
 
@@ -255,7 +261,8 @@ class Scheduler(EventListener):
             return
 
         self._emit_shadow_drops(
-            time, shadow_drops_from_queue(time, task_queue, self.shadow_dropped_job_ids))
+            time, shadow_drops_from_queue(time, task_queue, self.shadow_dropped_job_ids,
+                                          load_view=self.load_view))
 
     def _emit_shadow_drops(self, time: float, job_task_ids: list[tuple[int, int]]):
         if not job_task_ids:

@@ -17,8 +17,9 @@ from events.event_types import *
 
 class DecentralRoundRobinScheduler(Scheduler):
 
-    def __init__(self, em: EventManager, workers: dict[UUID, Worker], workflows: dict[int, Workflow]):
-        super().__init__(em, workers, workflows)
+    def __init__(self, em: EventManager, workers: dict[UUID, Worker],
+                 workflows: dict[int, Workflow], load_view=None):
+        super().__init__(em, workers, workflows, load_view)
 
         # (job ID, task ID) -> worker ID on which task result/output is stored
         self.output_locs: dict[tuple[int, int], UUID] = {}

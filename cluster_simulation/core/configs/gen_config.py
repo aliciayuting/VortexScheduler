@@ -223,13 +223,13 @@ BATCH_POLICY = "LARGEST"
 FALLBACK_TO_LARGEST_BATCH = True
 DISABLE_BATCHING = False  # always run batch size 1 when True
 
-# NONE | LAZY | EARLY
+# NONE | LAZY | EARLY | LOOKAHEAD
 DROP_POLICY = "NONE"
 SLO_SLACK = 0
 SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS
 
-# NONE | LAZY | EARLY: a drop policy that is evaluated but never enforced. Jobs it
-# would have dropped keep running, and the decision is recorded in the task log
+# NONE | LAZY | EARLY | LOOKAHEAD: a drop policy that is evaluated but never enforced.
+# Jobs it would have dropped keep running, and the decision is recorded in the task log
 # (shadow_dropped_timestamp / shadow_dropped_task_id) instead
 SHADOW_DROP_POLICY = "NONE"
 

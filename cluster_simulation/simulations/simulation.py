@@ -21,6 +21,8 @@ from workers.worker import Worker
 from core.allocation import ModelAllocation
 from schedulers.algo.vortex_planner_algo import VortexPlanner
 from schedulers.algo.nexus_algo import NexusSLOSplitter
+from schedulers.algo.drop_algo import DROP_POLICIES, scheduler_manages_queues
+from schedulers.algo.lookahead_algo import ClusterLoadView
 
 from verifiers.live_verifier import LiveVerifier
 from verifiers.log_verifier import LogVerifier
@@ -37,6 +39,11 @@ from uuid import uuid4
 class Simulation:
 
     def __init__(self, centralized: bool, out_path: str):
+        assert(gcfg.DROP_POLICY in DROP_POLICIES), \
+            f"Unrecognized drop policy {gcfg.DROP_POLICY}"
+        assert(gcfg.SHADOW_DROP_POLICY in DROP_POLICIES), \
+            f"Unrecognized shadow drop policy {gcfg.SHADOW_DROP_POLICY}"
+
         # a shadow drop policy measures what a drop policy would have shed from a
         # run that does not shed it; enforcing drops as well leaves it measuring
         # the leftovers of whatever DROP_POLICY already removed
@@ -54,9 +61,18 @@ class Simulation:
         self.clients = self._generate_clients()
 
         self.allocation = self._generate_model_allocation()
+
         self.workers = self._generate_workers()
 
         self._assign_nexus_task_slos()
+
+        # the load aware drop policies judge a job against the work the cluster has
+        # already taken on, which no single worker can see, so one view is shared by
+        # every worker and the scheduler. Built after the per-stage SLO split, whose
+        # batch size caps it needs to size its capacity estimates
+        self.load_view = ClusterLoadView(self.workers, self.workflows)
+        for worker in self.workers.values():
+            worker.load_view = self.load_view
 
         self.scheduler = None
         scheduler_worker_id = None
@@ -65,11 +81,13 @@ class Simulation:
 
             if gcfg.DISPATCH_POLICY == "SHEPHERD":
                 self.scheduler = ShepherdScheduler(
-                    self.em, self.workers, self.workflows, scheduler_worker_id)
+                    self.em, self.workers, self.workflows, scheduler_worker_id,
+                    self.load_view)
             
             elif gcfg.DISPATCH_POLICY == "ROUND_ROBIN":
                 self.scheduler = CentralRoundRobinScheduler(
-                    self.em, self.workers, self.workflows, scheduler_worker_id)
+                    self.em, self.workers, self.workflows, scheduler_worker_id,
+                    self.load_view)
 
             else:
                 assert("Unknown central dispatch policy")
@@ -77,11 +95,17 @@ class Simulation:
         else:
             if gcfg.DISPATCH_POLICY == "ROUND_ROBIN":
                 self.scheduler = DecentralRoundRobinScheduler(
-                    self.em, self.workers, self.workflows)
+                    self.em, self.workers, self.workflows, self.load_view)
                 
             else:
                 assert("Unknown decentral dispatch policy")
 
+
+        # the queues live either on the scheduler or on the workers; the view has
+        # to read whichever side actually holds them
+        self.load_view.set_queue_holders(
+            [self.scheduler] if scheduler_manages_queues()
+            else list(self.workers.values()))
 
         self.network = Network(self.em, scheduler_worker_id)
         self.verifier = LiveVerifier(self.em, 
