@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import pandas as pd
 
 import core.configs.gen_config as gcfg
@@ -36,6 +37,14 @@ from uuid import uuid4
 class Simulation:
 
     def __init__(self, centralized: bool, out_path: str):
+        # a shadow drop policy measures what a drop policy would have shed from a
+        # run that does not shed it; enforcing drops as well leaves it measuring
+        # the leftovers of whatever DROP_POLICY already removed
+        if gcfg.SHADOW_DROP_POLICY != "NONE" and gcfg.DROP_POLICY != "NONE":
+            print(f"[WARNING] SHADOW_DROP_POLICY = {gcfg.SHADOW_DROP_POLICY} is being "
+                  f"measured against a run that already drops (DROP_POLICY = "
+                  f"{gcfg.DROP_POLICY}), so it only sees jobs that survived it")
+
         self.out_path = out_path
         self.em = EventManager()
         self.is_centralized = centralized
@@ -344,10 +353,21 @@ class Simulation:
         idle_df.to_csv(os.path.join(self.out_path, "model_instance_idle_times.csv"))
 
     def _get_client_data(self):
+        """Writes the per job record. Every job also carries what
+        SHADOW_DROP_POLICY would have done to it: whether it would have been
+        dropped, when, and at which stage. Those columns are empty unless
+        SHADOW_DROP_POLICY is set, and always empty of consequence, since a shadow
+        dropped job ran to completion like any other.
+        """
+        shadow_drops = self.logger.shadow_dropped_jobs
+
         jobs_df = pd.DataFrame(columns=["client_id", "workflow_id", "job_id", "was_completed",
-                                        "deadline", "create_time", "response_time"])
+                                        "deadline", "create_time", "response_time",
+                                        "was_shadow_dropped", "shadow_drop_time",
+                                        "shadow_drop_task_id"])
         for client in self.clients:
             for jid, (create_time, finish_time, was_completed, deadline, job) in client.jobs.items():
+                shadow_drop_time, shadow_drop_task_id = shadow_drops.get(jid, (np.nan, np.nan))
                 jobs_df.loc[len(jobs_df)] = {
                     "client_id": client.id,
                     "workflow_id": job.job_type_id,
@@ -355,6 +375,9 @@ class Simulation:
                     "was_completed": was_completed,
                     "deadline": deadline,
                     "create_time": create_time,
-                    "response_time": finish_time - create_time
+                    "response_time": finish_time - create_time,
+                    "was_shadow_dropped": jid in shadow_drops,
+                    "shadow_drop_time": shadow_drop_time,
+                    "shadow_drop_task_id": shadow_drop_task_id
                 }
         jobs_df.to_csv(os.path.join(self.out_path, "job_log.csv"))

@@ -113,6 +113,7 @@ class ShepherdScheduler(Scheduler):
         instance_state = worker.GPU_state.get_instance_state(instance_id, time)
 
         # drop queued jobs that can no longer meet their deadline
+        self._shadow_drop_queued_jobs(time, self.queues[instance_state.model.data.id])
         self._drop_queued_jobs(time, self.queues[instance_state.model.data.id])
 
         # skip if queue is empty

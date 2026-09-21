@@ -12,6 +12,7 @@ _TASK_LOG_COLUMNS = [
     "job_id", "task_id", "client_id", "workflow_id", "model_id", "executing_worker_id",
     "arrival_at_scheduler_timestamp", "last_dep_dispatch_timestamp", "arrival_at_worker_timestamp",
     "execution_start_timestamp", "execution_end_timestamp", "dropped_timestamp",
+    "shadow_dropped_timestamp", "shadow_dropped_task_id",
     "curr_unfinished_jobs", "curr_idle_instances", "executing_worker_qlen_at_arrival",
 ]
 
@@ -42,6 +43,7 @@ class Logger(EventListener):
             EVENT_TYPES[EventIds.TASKS_OUTPUTS_ARRIVAL_AT_WORKER],
 
             EVENT_TYPES[EventIds.JOBS_DROPPED],
+            EVENT_TYPES[EventIds.JOBS_SHADOW_DROPPED],
             EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
             EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER],
             EVENT_TYPES[EventIds.RESPONSE_SENT_TO_CLIENT],
@@ -59,6 +61,20 @@ class Logger(EventListener):
         self.unfinished_jobs: set[int] = set()
         self.deps_to_task = {}
 
+        # job_id -> (time, task_id) of the first shadow drop reported for it, i.e.
+        # when SHADOW_DROP_POLICY would have dropped the job and at which stage.
+        # Kept so that tasks of the job logged after that point carry it too, since
+        # a shadow dropped job keeps running and going on to spawn more tasks.
+        self._shadow_dropped: dict[int, tuple[float, int]] = {}
+
+    @property
+    def shadow_dropped_jobs(self) -> dict[int, tuple[float, int]]:
+        """Job ID -> (time, task ID) of the first shadow drop reported for it, for
+        every job SHADOW_DROP_POLICY would have dropped. Empty when the policy is
+        NONE.
+        """
+        return self._shadow_dropped
+
     def finalize(self):
         """Build DataFrames from row buffers. Must be called once after the event loop ends."""
         self.task_log = pd.DataFrame(self._task_log_rows, columns=_TASK_LOG_COLUMNS)
@@ -73,6 +89,10 @@ class Logger(EventListener):
         return curr_idle_instances
 
     def _add_task_row(self, row: dict):
+        shadow_drop = self._shadow_dropped.get(row["job_id"])
+        if shadow_drop is not None:
+            row["shadow_dropped_timestamp"], row["shadow_dropped_task_id"] = shadow_drop
+
         key = (row["job_id"], row["task_id"])
         self._task_idx[key] = len(self._task_log_rows)
         self._job_task_keys.setdefault(row["job_id"], []).append(key)
@@ -95,6 +115,8 @@ class Logger(EventListener):
                         "execution_start_timestamp": np.nan,
                         "execution_end_timestamp": np.nan,
                         "dropped_timestamp": np.nan,
+                        "shadow_dropped_timestamp": np.nan,
+                        "shadow_dropped_task_id": np.nan,
                         "curr_unfinished_jobs": len(self.unfinished_jobs),
                         "curr_idle_instances": idle,
                         "executing_worker_qlen_at_arrival": np.nan,
@@ -114,6 +136,8 @@ class Logger(EventListener):
                     "execution_start_timestamp": np.nan,
                     "execution_end_timestamp": np.nan,
                     "dropped_timestamp": np.nan,
+                    "shadow_dropped_timestamp": np.nan,
+                    "shadow_dropped_task_id": np.nan,
                     "curr_unfinished_jobs": len(self.unfinished_jobs),
                     "curr_idle_instances": idle,
                     "executing_worker_qlen_at_arrival": np.nan,
@@ -153,6 +177,8 @@ class Logger(EventListener):
                         "execution_start_timestamp": np.nan,
                         "execution_end_timestamp": np.nan,
                         "dropped_timestamp": np.nan,
+                        "shadow_dropped_timestamp": np.nan,
+                        "shadow_dropped_task_id": np.nan,
                         "curr_unfinished_jobs": len(self.unfinished_jobs),
                         "curr_idle_instances": self._get_curr_idle_instances(event.time),
                         "executing_worker_qlen_at_arrival": np.nan,
@@ -225,6 +251,19 @@ class Logger(EventListener):
                 self.unfinished_jobs.remove(job_id)
                 for key in self._job_task_keys.get(job_id, []):
                     self._task_log_rows[self._task_idx[key]]["dropped_timestamp"] = event.time
+
+        elif event.type.id == EventIds.JOBS_SHADOW_DROPPED:
+            # the job was not dropped, so it stays in unfinished_jobs and its rows
+            # keep filling in; only record when the policy would have shed it
+            for job_id, task_id in event.kwargs["job_task_ids"]:
+                if job_id in self._shadow_dropped:
+                    continue
+
+                self._shadow_dropped[job_id] = (event.time, task_id)
+                for key in self._job_task_keys.get(job_id, []):
+                    row = self._task_log_rows[self._task_idx[key]]
+                    row["shadow_dropped_timestamp"] = event.time
+                    row["shadow_dropped_task_id"] = task_id
 
         elif event.type.id == EventIds.RESPONSE_SENT_TO_CLIENT:
             self.unfinished_jobs.remove(event.kwargs["job"].id)

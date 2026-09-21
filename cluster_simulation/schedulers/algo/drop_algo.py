@@ -62,9 +62,9 @@ def get_remaining_processing_time(task: Task, worker_size: int | None = None) ->
     return _get_processing_time(task.job, complete_task_ids)
 
 
-def should_drop_task(time: float, task: Task, worker_size: int | None = None) -> bool:
-    """Decides whether the job owning [task] should be dropped at [time] under the
-    configured drop policy.
+def _drops_task(policy: str, time: float, task: Task,
+                worker_size: int | None = None) -> bool:
+    """Decides whether [policy] would drop the job owning [task] at [time].
 
     The applicable deadline comes from [task.get_task_deadline]: the job deadline
     under JOB_LEVEL SLOs, this stage's deadline under NEXUS SLOs. LAZY drops only
@@ -74,25 +74,42 @@ def should_drop_task(time: float, task: Task, worker_size: int | None = None) ->
     whatever LAZY would, and never later than LAZY does.
 
     Args:
+        policy: One of DROP_POLICIES
         time: Time at which the drop decision is made
         task: Task whose job is considered for dropping
         worker_size: Memory size (GB) of the worker holding the task, if known (see
         [get_remaining_processing_time])
 
     Returns:
-        should_drop: True if the job should be dropped
+        should_drop: True if the policy would drop the job
     """
-    if gcfg.DROP_POLICY == "NONE":
+    if policy == "NONE":
         return False
 
     deadline = task.get_task_deadline()
 
-    if gcfg.DROP_POLICY == "LAZY":
+    if policy == "LAZY":
         return time > deadline
-    elif gcfg.DROP_POLICY == "EARLY":
+    elif policy == "EARLY":
         return (time + get_remaining_processing_time(task, worker_size)) > deadline
 
-    raise ValueError(f"Unrecognized drop policy {gcfg.DROP_POLICY}")
+    raise ValueError(f"Unrecognized drop policy {policy}")
+
+
+def should_drop_task(time: float, task: Task, worker_size: int | None = None) -> bool:
+    """Whether the job owning [task] should be dropped at [time] under DROP_POLICY,
+    i.e. whether it is actually removed from the cluster. See [_drops_task].
+    """
+    return _drops_task(gcfg.DROP_POLICY, time, task, worker_size)
+
+
+def should_shadow_drop_task(time: float, task: Task,
+                            worker_size: int | None = None) -> bool:
+    """Whether SHADOW_DROP_POLICY would have dropped the job owning [task] at
+    [time]. The job keeps running either way; the answer is only recorded. See
+    [_drops_task].
+    """
+    return _drops_task(gcfg.SHADOW_DROP_POLICY, time, task, worker_size)
 
 
 def drop_from_queue(time: float, task_queue: PriorityQueue,
@@ -132,3 +149,42 @@ def drop_from_queue(time: float, task_queue: PriorityQueue,
         task_queue.put(qt)
 
     return newly_dropped
+
+
+def shadow_drops_from_queue(time: float, task_queue: PriorityQueue,
+                            already_shadow_dropped: set[int],
+                            worker_size: int | None = None) -> list[tuple[int, int]]:
+    """Finds the queued tasks whose jobs SHADOW_DROP_POLICY would have dropped at
+    [time], leaving the queue untouched.
+
+    The queue is only read, never filtered: shadow drops must not change what the
+    simulation does, so a job that would have been dropped stays queued and is
+    reported once, the first time any policy check rejects it.
+
+    Args:
+        time: Time at which the drop decision is made
+        task_queue: Queue of QueuedTask to scan
+        already_shadow_dropped: IDs of jobs already reported as shadow dropped
+        worker_size: Memory size (GB) of the worker holding the queue, if known (see
+        [get_remaining_processing_time])
+
+    Returns:
+        newly_shadow_dropped: (job ID, task ID) of the jobs first shadow dropped by
+        this call, the task ID being the stage whose deadline they failed
+    """
+    if gcfg.SHADOW_DROP_POLICY == "NONE":
+        return []
+
+    seen_here: set[int] = set()
+    newly_shadow_dropped: list[tuple[int, int]] = []
+
+    for qt in list(task_queue.queue):
+        job_id = qt.task.job.id
+        if job_id in already_shadow_dropped or job_id in seen_here:
+            continue
+
+        if should_shadow_drop_task(time, qt.task, worker_size):
+            seen_here.add(job_id)
+            newly_shadow_dropped.append((job_id, qt.task.task_id))
+
+    return newly_shadow_dropped

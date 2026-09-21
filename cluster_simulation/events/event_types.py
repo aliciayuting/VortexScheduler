@@ -42,6 +42,12 @@ class EventIds:
     RESPONSE_SENT_TO_CLIENT             = 14
     RESPONSE_RECEIVED_AT_CLIENT         = 15
 
+    """
+    Jobs a drop policy would have dropped, had it been enforced. Carries no
+    consequence for the simulation; recorded by the logger only.
+    """
+    JOBS_SHADOW_DROPPED                 = 16
+
 
 EVENT_TYPES: dict[int, EventType] = {
     EventIds.JOB_SENT_TO_SCHEDULER: EventType(
@@ -126,6 +132,12 @@ EVENT_TYPES: dict[int, EventType] = {
         kwargs={"job_ids": True},
         emitter_types=[Agent.SCHEDULER, Agent.WORKER],
         listener_types=[Agent.SCHEDULER, Agent.WORKER, Agent.CLIENT, Agent.LOGGER, Agent.VERIFIER]),
+
+    EventIds.JOBS_SHADOW_DROPPED: EventType(
+        EventIds.JOBS_SHADOW_DROPPED, "Jobs Shadow Dropped",
+        kwargs={"job_task_ids": True},  # : list[tuple[int, int]]
+        emitter_types=[Agent.SCHEDULER, Agent.WORKER],
+        listener_types=[Agent.SCHEDULER, Agent.WORKER, Agent.LOGGER, Agent.VERIFIER]),
 
     EventIds.CHECK_QUEUE_AT_WORKER: EventType(
         EventIds.CHECK_QUEUE_AT_WORKER, "Check Queue for Execution at Worker",

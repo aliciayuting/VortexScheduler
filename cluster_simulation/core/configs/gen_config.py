@@ -59,7 +59,6 @@ CLIENT_CONFIGS = [
                       "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
           "SLO": int(80.48 * 5)}},
 
-
     # WF6 (textvision) with spike
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "BURST", "RATE": 100, "BURST_RATE": 175,
@@ -228,6 +227,11 @@ DISABLE_BATCHING = False  # always run batch size 1 when True
 DROP_POLICY = "NONE"
 SLO_SLACK = 0
 SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS
+
+# NONE | LAZY | EARLY: a drop policy that is evaluated but never enforced. Jobs it
+# would have dropped keep running, and the decision is recorded in the task log
+# (shadow_dropped_timestamp / shadow_dropped_task_id) instead
+SHADOW_DROP_POLICY = "NONE"
 
 # NONE | PROBABILISTIC | ROUND_ROBIN | TOKEN_BUCKET
 ADMISSION_CONTROL_POLICY = "NONE"

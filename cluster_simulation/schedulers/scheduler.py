@@ -10,7 +10,8 @@ from core.data_models.workflow import Workflow
 from workers.worker import Worker
 
 from schedulers.algo.admission_algo import AdmissionController
-from schedulers.algo.drop_algo import (should_drop_task, drop_from_queue,
+from schedulers.algo.drop_algo import (should_drop_task, should_shadow_drop_task,
+                                       drop_from_queue, shadow_drops_from_queue,
                                        scheduler_manages_queues)
 
 from events.event_manager import EventManager
@@ -35,6 +36,11 @@ class Scheduler(EventListener):
         # jobs known to be dropped, by this scheduler or by a worker
         self.dropped_job_ids: set[int] = set()
 
+        # jobs SHADOW_DROP_POLICY would have dropped, by this scheduler or by a
+        # worker. They keep running; the set only keeps each one from being
+        # reported more than once.
+        self.shadow_dropped_job_ids: set[int] = set()
+
         # load shedding at the front door, independent of DROP_POLICY. Jobs
         # arrive at the scheduler under every dispatch policy, so this runs here
         # regardless of where queues are managed.
@@ -44,6 +50,7 @@ class Scheduler(EventListener):
             EVENT_TYPES[EventIds.JOB_ARRIVAL_AT_SCHEDULER],
             EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
             EVENT_TYPES[EventIds.JOBS_DROPPED],
+            EVENT_TYPES[EventIds.JOBS_SHADOW_DROPPED],
             EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
             EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER]
         })
@@ -52,7 +59,8 @@ class Scheduler(EventListener):
             EVENT_TYPES[EventIds.TASKS_ASSIGNED_TO_WORKER],
             EVENT_TYPES[EventIds.TASKS_INPUTS_SENT_TO_WORKER],
             EVENT_TYPES[EventIds.TASKS_OUTPUTS_ASSIGNED_TO_WORKER],
-            EVENT_TYPES[EventIds.JOBS_DROPPED]
+            EVENT_TYPES[EventIds.JOBS_DROPPED],
+            EVENT_TYPES[EventIds.JOBS_SHADOW_DROPPED]
         })
 
     def on_event(self, event: Event):
@@ -62,6 +70,7 @@ class Scheduler(EventListener):
                 return
 
             source_tasks = [t for t in job.tasks if len(t.required_task_ids) == 0]
+            self._shadow_drop_jobs(event.time, source_tasks)
             if self._drop_jobs(event.time, source_tasks):
                 return
 
@@ -72,6 +81,8 @@ class Scheduler(EventListener):
             # predecessor was executing when the job was dropped
             tasks = [t for t in event.kwargs["tasks"]
                      if t.job.id not in self.dropped_job_ids]
+
+            self._shadow_drop_jobs(event.time, tasks)
 
             dropped = self._drop_jobs(event.time, tasks)
             tasks = [t for t in tasks if t.job.id not in dropped]
@@ -84,6 +95,9 @@ class Scheduler(EventListener):
         elif event.type.id == EventIds.JOBS_DROPPED:
             self.dropped_job_ids.update(event.kwargs["job_ids"])
             self.on_jobs_dropped(event.time, event.kwargs["job_ids"])
+        elif event.type.id == EventIds.JOBS_SHADOW_DROPPED:
+            self.shadow_dropped_job_ids.update(
+                jid for jid, _ in event.kwargs["job_task_ids"])
         elif event.type.id == EventIds.BATCH_STARTED_AT_WORKER:
             self.on_batch_start(event.time, event.kwargs["batch"], event.kwargs["worker_id"],
                                 event.kwargs["model_instance_id"])
@@ -156,6 +170,57 @@ class Scheduler(EventListener):
         dropped = drop_from_queue(time, task_queue, self.dropped_job_ids)
         self._emit_drops(time, dropped)
         return set(dropped)
+
+    def _shadow_drop_jobs(self, time: float, tasks: list[Task]):
+        """Records which of the jobs owning [tasks] SHADOW_DROP_POLICY would have
+        dropped at [time], without dropping them. Mirrors [_drop_jobs], including
+        its no-op when the workers own the queues, so that the shadow decision is
+        taken exactly where the real one would be.
+
+        Args:
+            time: Time at which the drop decision is made
+            tasks: Tasks whose jobs to consider shadow dropping
+        """
+        if not self.drops_at_scheduler or gcfg.SHADOW_DROP_POLICY == "NONE":
+            return
+
+        shadow_dropped = []
+        seen_here: set[int] = set()
+        for task in tasks:
+            if task.job.id in self.shadow_dropped_job_ids or task.job.id in seen_here:
+                continue
+
+            if should_shadow_drop_task(time, task):
+                seen_here.add(task.job.id)
+                shadow_dropped.append((task.job.id, task.task_id))
+
+        self._emit_shadow_drops(time, shadow_dropped)
+
+    def _shadow_drop_queued_jobs(self, time: float, task_queue: PriorityQueue):
+        """Records which jobs in a scheduler side queue SHADOW_DROP_POLICY would
+        have dropped at [time], leaving the queue untouched. Mirrors
+        [_drop_queued_jobs].
+
+        Args:
+            time: Time at which the drop decision is made
+            task_queue: Queue of QueuedTask to scan
+        """
+        if not self.drops_at_scheduler or gcfg.SHADOW_DROP_POLICY == "NONE":
+            return
+
+        self._emit_shadow_drops(
+            time, shadow_drops_from_queue(time, task_queue, self.shadow_dropped_job_ids))
+
+    def _emit_shadow_drops(self, time: float, job_task_ids: list[tuple[int, int]]):
+        if not job_task_ids:
+            return
+
+        self.shadow_dropped_job_ids.update(jid for jid, _ in job_task_ids)
+        self.em.add_event(
+            Event(time,
+                  EVENT_TYPES[EventIds.JOBS_SHADOW_DROPPED],
+                  kwargs={"job_task_ids": job_task_ids}),
+            self.emitter_id)
 
     def _emit_drops(self, time: float, job_ids: list[int]):
         if not job_ids:
