@@ -66,23 +66,22 @@ def get_model_capacities(workers: dict, time: float = 0,
     return capacities
 
 
-def get_workflow_capacities(workflows: dict[int, Workflow], workers: dict,
-                            demand_rates: dict[int, float],
-                            time: float = 0) -> dict[int, float]:
-    """Estimates the job rate (qps) each workflow can sustain on the current
-    allocation.
+def get_workflow_stage_capacities(workflows: dict[int, Workflow], workers: dict,
+                                  demand_rates: dict[int, float],
+                                  time: float = 0) -> dict[int, dict[int, float]]:
+    """Estimates the job rate (qps) each individual stage of each workflow can
+    sustain on the current allocation.
 
-    A workflow runs every one of its stages once per job, so its throughput is set
-    by its bottleneck stage: the model whose share of capacity, divided by how many
-    of the workflow's tasks use it, is smallest.
-
-    Models shared by several workflows have to be divided between them, and the
-    split determines how much of the cluster each tenant is allowed to claim. Each
-    model's capacity is shared in proportion to the demand placed on it, so a
-    workflow that asks for twice the rate is allotted twice the share, and a
-    workflow that shares nothing keeps its models entirely. Splitting by demand
-    keeps a single overloaded tenant from consuming a shared model and starving the
-    others, at the cost of not handing an idle tenant's share to a busy one.
+    A stage's rate is its workflow's share of the model it runs on. Models shared
+    by several workflows have to be divided between them, and the split determines
+    how much of the cluster each tenant is allowed to claim. Each model's capacity
+    is shared in proportion to the demand placed on it, so a workflow that asks for
+    twice the rate is allotted twice the share, and a workflow that shares nothing
+    keeps its models entirely. Splitting by demand keeps a single overloaded tenant
+    from consuming a shared model and starving the others, at the cost of not
+    handing an idle tenant's share to a busy one. A workflow that runs two of its
+    own stages on one model is counted twice against it, so the two stages split
+    that model between them as well.
 
     Args:
         workflows: Map of workflow ID -> workflow
@@ -92,7 +91,7 @@ def get_workflow_capacities(workflows: dict[int, Workflow], workers: dict,
         time: Time at which to read model placements
 
     Returns:
-        workflow_capacities: Workflow ID -> sustainable job rate (qps)
+        stage_capacities: Workflow ID -> task ID -> sustainable job rate (qps)
     """
     # per-stage SLOs cap how large a batch each stage may form, which lowers the
     # throughput its model can reach
@@ -119,9 +118,9 @@ def get_workflow_capacities(workflows: dict[int, Workflow], workers: dict,
             model_demand[task.model_data.id] = \
                 model_demand.get(task.model_data.id, 0) + weights[workflow.id]
 
-    capacities: dict[int, float] = {}
+    stage_capacities: dict[int, dict[int, float]] = {}
     for workflow in workflows.values():
-        stage_capacities = []
+        stage_capacities[workflow.id] = {}
         for task in workflow.tasks.values():
             model_id = task.model_data.id
             assert(model_id in model_capacities), \
@@ -132,8 +131,33 @@ def get_workflow_capacities(workflows: dict[int, Workflow], workers: dict,
 
             # this workflow's slice of the model, spread over the tasks of a
             # single job that need it
-            stage_capacities.append(model_capacities[model_id] * share * 1000)
+            stage_capacities[workflow.id][task.id] = \
+                model_capacities[model_id] * share * 1000
 
-        capacities[workflow.id] = min(stage_capacities)
+    return stage_capacities
 
-    return capacities
+
+def get_workflow_capacities(workflows: dict[int, Workflow], workers: dict,
+                            demand_rates: dict[int, float],
+                            time: float = 0) -> dict[int, float]:
+    """Estimates the job rate (qps) each workflow can sustain on the current
+    allocation.
+
+    A workflow runs every one of its stages once per job, so its throughput is set
+    by its bottleneck stage: the slowest of the per-stage rates computed by
+    [get_workflow_stage_capacities].
+
+    Args:
+        workflows: Map of workflow ID -> workflow
+        workers: Map of worker ID -> worker object
+        demand_rates: Workflow ID -> the send rate (qps) it is expected to offer,
+        used to weight the split of shared models
+        time: Time at which to read model placements
+
+    Returns:
+        workflow_capacities: Workflow ID -> sustainable job rate (qps)
+    """
+    stage_capacities = get_workflow_stage_capacities(
+        workflows, workers, demand_rates, time)
+
+    return {wid: min(stages.values()) for wid, stages in stage_capacities.items()}

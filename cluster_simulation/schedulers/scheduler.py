@@ -70,6 +70,9 @@ class Scheduler(EventListener):
                 return
 
             source_tasks = [t for t in job.tasks if len(t.required_task_ids) == 0]
+            if self._reject_tasks(event.time, source_tasks):
+                return
+
             self._shadow_drop_jobs(event.time, source_tasks)
             if self._drop_jobs(event.time, source_tasks):
                 return
@@ -81,6 +84,12 @@ class Scheduler(EventListener):
             # predecessor was executing when the job was dropped
             tasks = [t for t in event.kwargs["tasks"]
                      if t.job.id not in self.dropped_job_ids]
+
+            rejected = self._reject_tasks(event.time, tasks)
+            tasks = [t for t in tasks if t.job.id not in rejected]
+
+            if not tasks:
+                return
 
             self._shadow_drop_jobs(event.time, tasks)
 
@@ -108,8 +117,11 @@ class Scheduler(EventListener):
             raise ValueError(f"Scheduler received unregistered event: {event}")
 
     def _reject_on_arrival(self, time: float, job: Job) -> bool:
-        """Applies admission control to a job that just arrived, emitting
-        JOBS_DROPPED for it if the configured policy says to shed it.
+        """Applies job level admission control to a job that just arrived,
+        emitting JOBS_DROPPED for it if the configured policy says to shed it.
+
+        No-op under ADMISSION_GRANULARITY = TASK, where a job holds no bucket of
+        its own and its tasks are metered one stage at a time by [_reject_tasks].
 
         Args:
             time: Time the job arrived at the scheduler
@@ -123,6 +135,40 @@ class Scheduler(EventListener):
 
         self._emit_drops(time, [job.id])
         return True
+
+    def _reject_tasks(self, time: float, tasks: list[Task]) -> set[int]:
+        """Applies task level admission control to [tasks], which have just become
+        schedulable, emitting JOBS_DROPPED for the jobs of any that are refused.
+        No-op unless ADMISSION_GRANULARITY is TASK.
+
+        A refused task ends its job, since the stages behind it depend on its
+        output, so the job is dropped outright and whatever it has already
+        consumed upstream is wasted. That cost is the point of the comparison
+        against job level admission, which never pays it but can only decide on
+        arrival.
+
+        Args:
+            time: Time the tasks became schedulable
+            tasks: Tasks to admit or discard
+
+        Returns:
+            rejected: IDs of the jobs rejected by this call
+        """
+        if not self.admission_controller.per_task:
+            return set()
+
+        rejected = []
+        for task in tasks:
+            # a sibling branch of this job may already have been refused in this
+            # same call; the job is dead either way, so spend no more tokens on it
+            if task.job.id in self.dropped_job_ids or task.job.id in rejected:
+                continue
+
+            if self.admission_controller.should_reject_task(time, task):
+                rejected.append(task.job.id)
+
+        self._emit_drops(time, rejected)
+        return set(rejected)
 
     def _drop_jobs(self, time: float, tasks: list[Task]) -> set[int]:
         """Applies the configured drop policy to the jobs owning [tasks] and emits

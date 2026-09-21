@@ -236,6 +236,11 @@ SHADOW_DROP_POLICY = "NONE"
 # NONE | PROBABILISTIC | ROUND_ROBIN | TOKEN_BUCKET
 ADMISSION_CONTROL_POLICY = "NONE"
 ADMISSION_DROP_RATE = 0.1  # PROBABILISTIC or ROUND_ROBIN
+
+# JOB | TASK: what one token buys under TOKEN_BUCKET. JOB rates one bucket per
+# workflow at its bottleneck stage and decides once, on arrival. TASK gives every
+# pipeline stage its own bucket at its own rate and decides at each stage
+ADMISSION_GRANULARITY = "JOB"
 ADMISSION_TARGET_UTILIZATION = 0.9  # TOKEN_BUCKET: fraction of estimated capacity to admit
 
 # TOKEN_BUCKET: largest burst admitted at once, in jobs. None derives it per

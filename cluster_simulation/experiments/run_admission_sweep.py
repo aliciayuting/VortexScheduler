@@ -57,6 +57,18 @@ SWEEP_CONFIGS = {
                                "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
                                "ADMISSION_BURST_SIZE": None},
 
+    # the same two token bucket configurations metered per pipeline stage rather
+    # than per job: a task is discarded before it runs when its stage's bucket is
+    # empty, which ends its job and wastes whatever it already spent upstream
+    "central_rr_token_task": {"DROP_POLICY": "NONE",
+                              "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
+                              "ADMISSION_GRANULARITY": "TASK",
+                              "ADMISSION_BURST_SIZE": None},
+    "central_rr_5token_task": {"DROP_POLICY": "NONE",
+                               "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
+                               "ADMISSION_GRANULARITY": "TASK",
+                               "ADMISSION_BURST_SIZE": 5},
+
     # the three token bucket configurations repeated at a higher target
     # utilization, i.e. admitting a larger fraction of estimated capacity
     "central_rr_token_95": {"DROP_POLICY": "NONE",
