@@ -8,12 +8,15 @@ the average load looks like at each moment, the arrival process says how much
 randomness there is around it.
 """
 
+import os
+
 import numpy as np
+import pandas as pd
 
 import core.configs.gen_config as gcfg
 
 
-ARRIVAL_PROCESSES = ["CONSTANT", "POISSON", "GAMMA"]
+ARRIVAL_PROCESSES = ["CONSTANT", "POISSON", "GAMMA", "ALITRACE"]
 
 # CONSTANT: fixed RATE
 # BURST:    alternates between RATE and BURST_RATE, spending BURST_DURATION ms in
@@ -144,8 +147,48 @@ class Workload:
         self.gamma_cv = cfg.get("GAMMA_CV", gcfg.DEFAULT_GAMMA_CV)
         assert(self.gamma_cv > 0)
 
+        self.trace_file_path = cfg.get("TRACE_FILE_PATH", cfg.get("trace_file_path"))
+        self.trace_arrival_times: list[float] = []
+
+        if self.arrival_process == "ALITRACE":
+            if self.trace_file_path is None:
+                repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                self.trace_file_path = os.path.join(repo_root, "workflow", "azuretrace", "llm_az_processed_trace.csv")
+            self.trace_arrival_times = self._load_trace_arrivals(self.trace_file_path)
+            duration = max(float(self.trace_arrival_times[-1] - self.trace_arrival_times[0]) if len(self.trace_arrival_times) > 1 else 1.0, 1.0)
+            self.phases = [WorkloadPhase({"KIND": "CONSTANT", "RATE": self.mean_rate(), "DURATION": duration})]
+            return
+
         self.phases = [WorkloadPhase(p) for p in cfg["PHASES"]]
         assert(self.phases), "A workload needs at least one phase"
+
+    def _load_trace_arrivals(self, trace_file_path: str) -> list[float]:
+        """Loads a real arrival trace from a CSV file and normalizes it to ms.
+
+        Supported columns include creation_time and start_timestamp_ms, which are
+        common in the repo's workflow trace datasets.
+        """
+        expanded_path = os.path.abspath(os.path.expanduser(trace_file_path))
+        if not os.path.exists(expanded_path):
+            raise FileNotFoundError(f"Trace file not found: {expanded_path}")
+
+        df = pd.read_csv(expanded_path)
+        for col_name in ["creation_time", "start_timestamp_ms", "arrival_time", "timestamp_ms"]:
+            if col_name in df.columns:
+                arrival_times = pd.to_numeric(df[col_name], errors="coerce").dropna().to_numpy(dtype=float)
+                break
+        else:
+            raise ValueError(
+                f"Trace file {expanded_path} does not contain a supported arrival-time column; "
+                "expected one of: creation_time, start_timestamp_ms, arrival_time, timestamp_ms"
+            )
+
+        arrival_times = np.sort(arrival_times)
+        if arrival_times.size == 0:
+            raise ValueError(f"Trace file {expanded_path} contains no usable arrival times")
+
+        arrival_times = arrival_times - arrival_times.min()
+        return arrival_times.astype(float).tolist()
 
     def generate_arrival_times(self, start_time: float) -> list[float]:
         """Generates the times at which this workload sends jobs.
@@ -156,6 +199,9 @@ class Workload:
         Returns:
             arrival_times: Send times in increasing order (ms)
         """
+        if self.arrival_process == "ALITRACE":
+            return [float(start_time + arrival_time) for arrival_time in self.trace_arrival_times]
+
         times: list[float] = []
 
         phase_start = start_time
@@ -221,12 +267,29 @@ class Workload:
 
     def peak_rate(self) -> float:
         """Returns the highest send rate (qps) reached by any phase."""
+        if self.arrival_process == "ALITRACE":
+            if not self.trace_arrival_times:
+                return 0.0
+            diffs = np.diff(np.asarray(self.trace_arrival_times, dtype=float))
+            positive = diffs[diffs > 0]
+            if positive.size == 0:
+                return 0.0
+            return 1000.0 / positive.min()
+
         return max(phase.peak_rate() for phase in self.phases)
 
     def mean_rate(self) -> float:
         """Returns the send rate (qps) averaged over the whole workload, weighting
         each phase by how long it is expected to last.
         """
+        if self.arrival_process == "ALITRACE":
+            if not self.trace_arrival_times:
+                return 0.0
+            trace = np.asarray(self.trace_arrival_times, dtype=float)
+            duration = float(trace[-1] - trace[0]) if trace.size > 1 else 1.0
+            duration = max(duration, 1e-9)
+            return len(trace) * 1000.0 / duration
+
         total_duration = sum(phase.expected_duration() for phase in self.phases)
         assert(total_duration > 0)
 

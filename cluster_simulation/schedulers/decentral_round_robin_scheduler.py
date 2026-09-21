@@ -17,8 +17,9 @@ from events.event_types import *
 
 class DecentralRoundRobinScheduler(Scheduler):
 
-    def __init__(self, em: EventManager, workers: dict[UUID, Worker], workflows: dict[int, Workflow]):
-        super().__init__(em, workers, workflows)
+    def __init__(self, em: EventManager, workers: dict[UUID, Worker],
+                 workflows: dict[int, Workflow], load_view=None):
+        super().__init__(em, workers, workflows, load_view)
 
         # (job ID, task ID) -> worker ID on which task result/output is stored
         self.output_locs: dict[tuple[int, int], UUID] = {}
@@ -100,6 +101,21 @@ class DecentralRoundRobinScheduler(Scheduler):
             # workers drop for decentralized schedulers; do not dispatch further
             # stages of a job that was already dropped
             if task.job.id in self.dropped_job_ids:
+                continue
+
+            # a decentralized run routes finished work straight to the next
+            # worker, so its downstream stages never raise
+            # TASKS_ARRIVAL_AT_SCHEDULER. This is therefore where they become
+            # schedulable, and where task level admission control meters them.
+            # A stage that joins several branches is reached once per branch but
+            # only scheduled on the first, so it is metered there too, against
+            # the same condition the dispatch below uses.
+            if self.admission_controller.per_task \
+                    and self._reject_tasks(time,
+                                           [task.job.get_task_by_id(tid)
+                                            for tid in task.next_task_ids
+                                            if (task.job.id, tid)
+                                            not in self.scheduled_task_to_worker]):
                 continue
 
             for next_task_id in task.next_task_ids:

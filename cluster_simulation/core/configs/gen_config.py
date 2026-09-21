@@ -44,9 +44,20 @@ MAX_NUM_MODELS_PER_NODE = 4
 
 CLIENT_CONFIGS = [
     # WF6 (textvision)
-    {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-                      "PHASES": [{"KIND": "CONSTANT", "RATE": 120, "NUM_JOBS": 20000}]},
+    # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 120, "NUM_JOBS": 20000}]},
+    #      "SLO": int(62.48 * 5)}},
+
+    # Real trace
+    {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
+                     "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
          "SLO": int(62.48 * 5)}},
+    {10: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
+                      "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
+          "SLO": int(70.48 * 5)}},
+    {11: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
+                      "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
+          "SLO": int(80.48 * 5)}},
 
     # WF6 (textvision) with spike
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -212,14 +223,24 @@ BATCH_POLICY = "LARGEST"
 FALLBACK_TO_LARGEST_BATCH = True
 DISABLE_BATCHING = False  # always run batch size 1 when True
 
-# NONE | LAZY | EARLY
+# NONE | LAZY | EARLY | LOOKAHEAD
 DROP_POLICY = "NONE"
 SLO_SLACK = 0
 SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS
 
+# NONE | LAZY | EARLY | LOOKAHEAD: a drop policy that is evaluated but never enforced.
+# Jobs it would have dropped keep running, and the decision is recorded in the task log
+# (shadow_dropped_timestamp / shadow_dropped_task_id) instead
+SHADOW_DROP_POLICY = "NONE"
+
 # NONE | PROBABILISTIC | ROUND_ROBIN | TOKEN_BUCKET
 ADMISSION_CONTROL_POLICY = "NONE"
 ADMISSION_DROP_RATE = 0.1  # PROBABILISTIC or ROUND_ROBIN
+
+# JOB | TASK: what one token buys under TOKEN_BUCKET. JOB rates one bucket per
+# workflow at its bottleneck stage and decides once, on arrival. TASK gives every
+# pipeline stage its own bucket at its own rate and decides at each stage
+ADMISSION_GRANULARITY = "JOB"
 ADMISSION_TARGET_UTILIZATION = 0.9  # TOKEN_BUCKET: fraction of estimated capacity to admit
 
 # TOKEN_BUCKET: largest burst admitted at once, in jobs. None derives it per
@@ -235,16 +256,16 @@ AUTOSCALING_POLICY = "NONE"
 # HERD | CUSTOM | INFERLINE
 ALLOCATION_STRATEGY = "CUSTOM"
 
-# WF6 alloc (textvision)
+# WF6/10/11 alloc (textvision variants)
 CUSTOM_ALLOCATION = [
     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
-    (6, [14]), (6, []), (6, []), (6, [])
+    (6, [14]), (6, [15]), (6, [16]), (6, [])
 ]
 
-# WF6/10/11 alloc (textvision variants)
+# WF6 alloc (older textvision-only placement; kept as commented fallback)
 # CUSTOM_ALLOCATION = [
 #     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
-#     (6, [14]), (6, [15]), (6, [16]), (6, [])
+#     (6, [14]), (6, []), (6, []), (6, [])
 # ]
 
 # WF1 alloc (ppl2)

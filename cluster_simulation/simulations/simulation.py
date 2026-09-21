@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import pandas as pd
 
 import core.configs.gen_config as gcfg
@@ -20,6 +21,8 @@ from workers.worker import Worker
 from core.allocation import ModelAllocation
 from schedulers.algo.vortex_planner_algo import VortexPlanner
 from schedulers.algo.nexus_algo import NexusSLOSplitter
+from schedulers.algo.drop_algo import DROP_POLICIES, scheduler_manages_queues
+from schedulers.algo.lookahead_algo import ClusterLoadView
 
 from verifiers.live_verifier import LiveVerifier
 from verifiers.log_verifier import LogVerifier
@@ -36,6 +39,19 @@ from uuid import uuid4
 class Simulation:
 
     def __init__(self, centralized: bool, out_path: str):
+        assert(gcfg.DROP_POLICY in DROP_POLICIES), \
+            f"Unrecognized drop policy {gcfg.DROP_POLICY}"
+        assert(gcfg.SHADOW_DROP_POLICY in DROP_POLICIES), \
+            f"Unrecognized shadow drop policy {gcfg.SHADOW_DROP_POLICY}"
+
+        # a shadow drop policy measures what a drop policy would have shed from a
+        # run that does not shed it; enforcing drops as well leaves it measuring
+        # the leftovers of whatever DROP_POLICY already removed
+        if gcfg.SHADOW_DROP_POLICY != "NONE" and gcfg.DROP_POLICY != "NONE":
+            print(f"[WARNING] SHADOW_DROP_POLICY = {gcfg.SHADOW_DROP_POLICY} is being "
+                  f"measured against a run that already drops (DROP_POLICY = "
+                  f"{gcfg.DROP_POLICY}), so it only sees jobs that survived it")
+
         self.out_path = out_path
         self.em = EventManager()
         self.is_centralized = centralized
@@ -45,9 +61,18 @@ class Simulation:
         self.clients = self._generate_clients()
 
         self.allocation = self._generate_model_allocation()
+
         self.workers = self._generate_workers()
 
         self._assign_nexus_task_slos()
+
+        # the load aware drop policies judge a job against the work the cluster has
+        # already taken on, which no single worker can see, so one view is shared by
+        # every worker and the scheduler. Built after the per-stage SLO split, whose
+        # batch size caps it needs to size its capacity estimates
+        self.load_view = ClusterLoadView(self.workers, self.workflows)
+        for worker in self.workers.values():
+            worker.load_view = self.load_view
 
         self.scheduler = None
         scheduler_worker_id = None
@@ -56,11 +81,13 @@ class Simulation:
 
             if gcfg.DISPATCH_POLICY == "SHEPHERD":
                 self.scheduler = ShepherdScheduler(
-                    self.em, self.workers, self.workflows, scheduler_worker_id)
+                    self.em, self.workers, self.workflows, scheduler_worker_id,
+                    self.load_view)
             
             elif gcfg.DISPATCH_POLICY == "ROUND_ROBIN":
                 self.scheduler = CentralRoundRobinScheduler(
-                    self.em, self.workers, self.workflows, scheduler_worker_id)
+                    self.em, self.workers, self.workflows, scheduler_worker_id,
+                    self.load_view)
 
             else:
                 assert("Unknown central dispatch policy")
@@ -68,11 +95,17 @@ class Simulation:
         else:
             if gcfg.DISPATCH_POLICY == "ROUND_ROBIN":
                 self.scheduler = DecentralRoundRobinScheduler(
-                    self.em, self.workers, self.workflows)
+                    self.em, self.workers, self.workflows, self.load_view)
                 
             else:
                 assert("Unknown decentral dispatch policy")
 
+
+        # the queues live either on the scheduler or on the workers; the view has
+        # to read whichever side actually holds them
+        self.load_view.set_queue_holders(
+            [self.scheduler] if scheduler_manages_queues()
+            else list(self.workers.values()))
 
         self.network = Network(self.em, scheduler_worker_id)
         self.verifier = LiveVerifier(self.em, 
@@ -344,10 +377,21 @@ class Simulation:
         idle_df.to_csv(os.path.join(self.out_path, "model_instance_idle_times.csv"))
 
     def _get_client_data(self):
+        """Writes the per job record. Every job also carries what
+        SHADOW_DROP_POLICY would have done to it: whether it would have been
+        dropped, when, and at which stage. Those columns are empty unless
+        SHADOW_DROP_POLICY is set, and always empty of consequence, since a shadow
+        dropped job ran to completion like any other.
+        """
+        shadow_drops = self.logger.shadow_dropped_jobs
+
         jobs_df = pd.DataFrame(columns=["client_id", "workflow_id", "job_id", "was_completed",
-                                        "deadline", "create_time", "response_time"])
+                                        "deadline", "create_time", "response_time",
+                                        "was_shadow_dropped", "shadow_drop_time",
+                                        "shadow_drop_task_id"])
         for client in self.clients:
             for jid, (create_time, finish_time, was_completed, deadline, job) in client.jobs.items():
+                shadow_drop_time, shadow_drop_task_id = shadow_drops.get(jid, (np.nan, np.nan))
                 jobs_df.loc[len(jobs_df)] = {
                     "client_id": client.id,
                     "workflow_id": job.job_type_id,
@@ -355,6 +399,9 @@ class Simulation:
                     "was_completed": was_completed,
                     "deadline": deadline,
                     "create_time": create_time,
-                    "response_time": finish_time - create_time
+                    "response_time": finish_time - create_time,
+                    "was_shadow_dropped": jid in shadow_drops,
+                    "shadow_drop_time": shadow_drop_time,
+                    "shadow_drop_task_id": shadow_drop_task_id
                 }
         jobs_df.to_csv(os.path.join(self.out_path, "job_log.csv"))

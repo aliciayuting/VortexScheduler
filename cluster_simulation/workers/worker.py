@@ -4,7 +4,8 @@ from queue import PriorityQueue
 from queue_management.queued_task import QueuedTask
 from queue_management.batching import TaskBatcher
 
-from schedulers.algo.drop_algo import drop_from_queue, scheduler_manages_queues
+from schedulers.algo.drop_algo import (drop_from_queue, shadow_drops_from_queue,
+                                       scheduler_manages_queues)
 
 from events.event_manager import EventManager
 from events.event import *
@@ -24,11 +25,17 @@ class Worker(EventListener):
     _abandoned_batches = []
 
     def __init__(self, id: UUID, em: EventManager, total_memory_gb: int, create_time: float,
-                 is_centralized: bool):
+                 is_centralized: bool, load_view=None):
         super().__init__(Agent.WORKER)
 
         self.id = id
         self.em = em
+
+        # what the cluster has already accepted, for the load aware drop policies.
+        # A worker sees only its own queue, so this is the one way it can judge a
+        # job against the stages it has yet to reach. Set by the simulation, which
+        # shares one view between every worker and the scheduler
+        self.load_view = load_view
         self.is_centralized = is_centralized
         self.total_memory_gb = total_memory_gb
         self.create_time = create_time
@@ -43,6 +50,7 @@ class Worker(EventListener):
             EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
             EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER],
             EVENT_TYPES[EventIds.JOBS_DROPPED],
+            EVENT_TYPES[EventIds.JOBS_SHADOW_DROPPED],
         })
 
         self.emitter_id = self.em.register_emitter(Agent.WORKER, {
@@ -52,6 +60,7 @@ class Worker(EventListener):
             EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
             EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER],
             EVENT_TYPES[EventIds.JOBS_DROPPED],
+            EVENT_TYPES[EventIds.JOBS_SHADOW_DROPPED],
             EVENT_TYPES[EventIds.RESPONSE_SENT_TO_CLIENT]
         })
 
@@ -61,6 +70,11 @@ class Worker(EventListener):
 
         # jobs known to be dropped, by this worker or by any other agent
         self.dropped_job_ids: set[int] = set()
+
+        # jobs SHADOW_DROP_POLICY would have dropped, by this worker or by any
+        # other agent. They keep running; the set only keeps each one from being
+        # reported more than once.
+        self.shadow_dropped_job_ids: set[int] = set()
 
         self.queues: dict[int, PriorityQueue] = {}
         self.completed_tasks: dict[tuple[int, int], Task] = {}
@@ -107,6 +121,12 @@ class Worker(EventListener):
         elif event.type.id == EventIds.JOBS_DROPPED:
             self.dropped_job_ids.update(event.kwargs["job_ids"])
             self._drop_tasks(event.kwargs["job_ids"])
+
+        elif event.type.id == EventIds.JOBS_SHADOW_DROPPED:
+            # nothing to drop: the job keeps running, this only records that some
+            # agent has already reported it
+            self.shadow_dropped_job_ids.update(
+                jid for jid, _ in event.kwargs["job_task_ids"])
 
         elif event.type.id == EventIds.CHECK_QUEUE_AT_WORKER:
             if event.kwargs["worker_id"] != self.id:
@@ -282,7 +302,7 @@ class Worker(EventListener):
             return
 
         newly_dropped = drop_from_queue(time, self.queues[model_id], self.dropped_job_ids,
-                                        self.total_memory_gb)
+                                        self.total_memory_gb, self.load_view)
         if not newly_dropped:
             return
 
@@ -294,7 +314,38 @@ class Worker(EventListener):
             self.emitter_id)
 
 
+    def _shadow_drop_undeliverable_jobs(self, time: float, model_id: int):
+        """Records which queued jobs SHADOW_DROP_POLICY would have rejected at
+        [time] and announces them, without removing anything from the queue.
+        Mirrors [_drop_undeliverable_jobs], including its no-op when the scheduler
+        owns the queues.
+
+        Args:
+            time: Time at which the drop decision is made
+            model_id: Model whose queue should be scanned
+        """
+        if not self.drops_at_worker or gcfg.SHADOW_DROP_POLICY == "NONE":
+            return
+
+        if model_id not in self.queues:
+            return
+
+        newly_shadow_dropped = shadow_drops_from_queue(
+            time, self.queues[model_id], self.shadow_dropped_job_ids,
+            self.total_memory_gb, self.load_view)
+        if not newly_shadow_dropped:
+            return
+
+        self.shadow_dropped_job_ids.update(jid for jid, _ in newly_shadow_dropped)
+        self.em.add_event(
+            Event(time,
+                  EVENT_TYPES[EventIds.JOBS_SHADOW_DROPPED],
+                  kwargs={"job_task_ids": newly_shadow_dropped}),
+            self.emitter_id)
+
+
     def on_check_queue(self, time: float, model_id: int):
+        self._shadow_drop_undeliverable_jobs(time, model_id)
         self._drop_undeliverable_jobs(time, model_id)
 
         # if no tasks queued, do nothing
