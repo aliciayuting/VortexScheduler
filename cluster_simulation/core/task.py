@@ -24,16 +24,32 @@ class Task(object):
 
     def get_task_deadline(self):
         """Returns the time by which this task must finish. Under job-level SLOs
-        that is the job's own deadline; under NEXUS SLOs it is the deadline of
+        that is the job's own deadline; under per-stage SLOs it is the deadline of
         this task's pipeline stage.
         """
-        if gcfg.SLO_TYPE == "NEXUS":
+        if gcfg.SLO_TYPE != "JOB_LEVEL":
             # read through the workflow rather than a value copied at task creation,
             # since the split is computed after model placement, i.e. after jobs exist
             offset = self.job.workflow.get_task_deadline_offset(self.task_id)
             return self.job.create_time + offset * (1 + gcfg.SLO_SLACK)
         else:
             return self.job.create_time + self.job.slo * (1 + gcfg.SLO_SLACK)
+
+    def get_max_batch_size(self) -> int:
+        """Returns the largest batch this task may be placed in.
+
+        That is the model's configured maximum, except under SLO_TYPE=NEXUS, where
+        the per-stage split also caps the batch at what this stage's own SLO budget
+        affords. NEXUS_SPLIT deliberately leaves the cap unenforced, using it only
+        to estimate throughput.
+        """
+        max_batch_size = self.model_data.max_batch_size
+
+        if gcfg.SLO_TYPE == "NEXUS":
+            max_batch_size = min(max_batch_size,
+                                 self.job.workflow.task_max_batch_sizes[self.task_id])
+
+        return max_batch_size
 
     def __hash__(self):
         return hash((self.task_id, self.job.id))

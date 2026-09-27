@@ -148,7 +148,8 @@ def _load_sources(srcs: list[tuple[str, str]],
 
 
 def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: bool,
-                                normalize_by_job_size: bool, save_fig: bool, out_path: str):
+                                normalize_by_job_size: bool, save_fig: bool, out_path: str,
+                                max_job_size_multiple: float = 10):
     """Plots the tail CDF of job response time for every run in [srcs].
 
     The two options are independent and may be combined:
@@ -165,12 +166,14 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
         normalize_by_job_size: X axis in multiples of job size rather than ms
         save_fig: Write the figure to [out_path] instead of displaying it
         out_path: Where to save the figure
+        max_job_size_multiple: Right edge of the x axis when normalizing, so that
+        runs whose SLO exceeds the default still show their tail
     """
     palette = sns.color_palette("tab10", len(srcs))
     loaded_srcs, max_res = _load_sources(srcs, need_job_sizes=normalize_by_job_size)
 
     if normalize_by_job_size:
-        thresholds = np.linspace(0, 10, 250)
+        thresholds = np.linspace(0, max_job_size_multiple, 250)
         xlabel = "Response time as multiple of job size"
     else:
         thresholds = np.arange(0, max_res, 1)
@@ -260,6 +263,9 @@ if __name__ == "__main__":
                         help="Split by workflow")
     parser.add_argument("--out", type=str,
                         help="Output directory path for saved figures")
+    parser.add_argument("--xmax", type=float, default=10,
+                        help="With --normalize, the right edge of the x axis in "
+                             "multiples of job size (default: 10)")
     parser.add_argument("--normalize", action="store_true",
                         help="Normalize response time to a multiple of job size (the "
                              "workflow's critical path at batch size 1) instead of "
@@ -277,4 +283,5 @@ if __name__ == "__main__":
     else:
         out_path = "tail_by_workflow.pdf" if args.split else "tail_agg.pdf"
 
-    plot_response_time_tail_cdf(srcs, args.split, args.normalize, args.pdf, out_path)
+    plot_response_time_tail_cdf(srcs, args.split, args.normalize, args.pdf, out_path,
+                                args.xmax)

@@ -58,7 +58,7 @@ def get_remaining_processing_time(task: Task, worker_size: int | None = None) ->
         exec times to read. Callers that do not know where the task will run pass
         None, and the slowest worker size the model is profiled for is assumed.
     """
-    if gcfg.SLO_TYPE == "NEXUS":
+    if gcfg.SLO_TYPE != "JOB_LEVEL":
         exec_times = task.model_data.batch_exec_times
         if worker_size is not None and worker_size in exec_times:
             return exec_times[worker_size][1]
@@ -104,7 +104,7 @@ def get_remaining_time_with_queueing(time: float, task: Task, load_view,
 
         return get_min_exec_time(model_data)
 
-    if gcfg.SLO_TYPE == "NEXUS":
+    if gcfg.SLO_TYPE != "JOB_LEVEL":
         return (load_view.get_queue_delay(task.model_data.id, time)
                 + _exec_time(task.model_data, True))
 

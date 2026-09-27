@@ -21,7 +21,7 @@ class Workflow:
                 models[cfg["MODEL_ID"]],
                 cfg["INPUT_SIZE"],
                 cfg["OUTPUT_SIZE"],
-                cfg["SLO"] if slo_type == "NEXUS" else None)
+                cfg["SLO"] if slo_type != "JOB_LEVEL" else None)
             
             self.tasks[task.id] = task
 
@@ -37,7 +37,8 @@ class Workflow:
             task.next_tasks = [self.tasks[id]
                                for id in cfg["NEXT_TASK_INDEX"]]
 
-        # per-stage SLO split, populated by assign_task_slos() when SLO_TYPE is NEXUS
+        # per-stage SLO split, populated by assign_task_slos() under SLO_TYPE
+        # NEXUS_SPLIT or NEXUS
         self.job_slo: float | None = None
         self.task_slos: dict[int, float] = {}
         self.task_max_batch_sizes: dict[int, int] = {}

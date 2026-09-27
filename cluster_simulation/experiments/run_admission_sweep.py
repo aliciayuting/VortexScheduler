@@ -32,12 +32,12 @@ SWEEP_CONFIGS = {
                           "SLO_TYPE": "JOB_LEVEL",
                           "ADMISSION_CONTROL_POLICY": "NONE"},
     "central_rr_nexus":  {"DROP_POLICY": "EARLY",
-                          "SLO_TYPE": "NEXUS",
+                          "SLO_TYPE": "NEXUS_SPLIT",
                           "ADMISSION_CONTROL_POLICY": "NONE"},
     # no dropping, but with the Nexus per-stage SLO split in place, recording
     # which jobs Nexus would have dropped instead of dropping them
     "central_rr_nexus_shadow": {"DROP_POLICY": "NONE",
-                                "SLO_TYPE": "NEXUS",
+                                "SLO_TYPE": "NEXUS_SPLIT",
                                 "SHADOW_DROP_POLICY": "EARLY",
                                 "ADMISSION_CONTROL_POLICY": "NONE"},
     "central_rr_10prob": {"DROP_POLICY": "NONE",
@@ -53,9 +53,15 @@ SWEEP_CONFIGS = {
                           "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
                           "ADMISSION_BURST_SIZE": 5},
     "central_rr_token_nexus": {"DROP_POLICY": "EARLY",
-                               "SLO_TYPE": "NEXUS",
+                               "SLO_TYPE": "NEXUS_SPLIT",
                                "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
                                "ADMISSION_BURST_SIZE": None},
+
+    # Nexus as published: the same per-stage SLO split as central_rr_nexus, but
+    # with the batch size cap that split implies actually enforced at batching
+    "central_rr_nexus_enforced": {"DROP_POLICY": "EARLY",
+                                  "SLO_TYPE": "NEXUS",
+                                  "ADMISSION_CONTROL_POLICY": "NONE"},
 
     # the queue aware drop policy, which sheds a job once the work already in the
     # cluster means its remaining stages cannot finish in time. Paired against
@@ -87,7 +93,7 @@ SWEEP_CONFIGS = {
                              "ADMISSION_BURST_SIZE": 5,
                              "ADMISSION_TARGET_UTILIZATION": 0.95},
     "central_rr_token_nexus_95": {"DROP_POLICY": "EARLY",
-                                  "SLO_TYPE": "NEXUS",
+                                  "SLO_TYPE": "NEXUS_SPLIT",
                                   "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
                                   "ADMISSION_BURST_SIZE": None,
                                   "ADMISSION_TARGET_UTILIZATION": 0.95},

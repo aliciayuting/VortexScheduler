@@ -35,8 +35,8 @@ class ClusterLoadView:
         Args:
             workers: Map of worker ID -> worker object
             workflows: Map of workflow ID -> workflow, used to cap each model's
-            throughput by the largest batch its stages may form under per-stage
-            (NEXUS) SLOs. Omitted, no cap is applied.
+            throughput by the largest batch its stages may form under NEXUS SLOs.
+            Omitted, no cap is applied.
         """
         self.workers = workers
 
@@ -44,8 +44,9 @@ class ClusterLoadView:
         # scheduler itself when it manages queues, otherwise the workers
         self._queue_holders: list = list(workers.values())
 
-        # a stage's SLO caps the batch it may form, which lowers the throughput its
-        # model can sustain. Matches the cap the admission controller sizes against
+        # under NEXUS a stage's SLO caps the batch it may form, which lowers the
+        # throughput its model can sustain. Matches the cap the admission controller
+        # sizes against, and the one enforced at batching
         self._max_batch_sizes: dict[int, int] = {}
         if workflows and gcfg.SLO_TYPE == "NEXUS":
             for workflow in workflows.values():

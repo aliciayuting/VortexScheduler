@@ -246,7 +246,7 @@ class AdmissionController:
         deadline of its stage, falling back to [job_slack] when the run has no
         per-stage SLO split to read.
         """
-        if gcfg.SLO_TYPE != "NEXUS" or not workflow.task_slos:
+        if gcfg.SLO_TYPE == "JOB_LEVEL" or not workflow.task_slos:
             return job_slack
 
         task = workflow.tasks[task_id]

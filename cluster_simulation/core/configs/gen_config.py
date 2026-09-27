@@ -226,7 +226,8 @@ DISABLE_BATCHING = False  # always run batch size 1 when True
 # NONE | LAZY | EARLY | LOOKAHEAD
 DROP_POLICY = "NONE"
 SLO_SLACK = 0
-SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS
+# JOB_LEVEL | NEXUS_SPLIT (batch caps not enforced) | NEXUS
+SLO_TYPE = "JOB_LEVEL"
 
 # NONE | LAZY | EARLY | LOOKAHEAD: a drop policy that is evaluated but never enforced.
 # Jobs it would have dropped keep running, and the decision is recorded in the task log
