@@ -142,7 +142,12 @@ def run_one(config_name: str, out_path: str):
         f.write(f"\n\n\"\"\" ----- overrides applied by run_admission_sweep.py "
                 f"({config_name}) ----- \"\"\"\n\n")
         for option, value in overrides.items():
-            f.write(f"{option} = {value!r}\n")
+            # plain strings are written double quoted, like the rest of the
+            # config: tools that read it line by line look for that form, and a
+            # repr'd single-quoted override would be passed over in favour of
+            # the original assignment further up the file
+            literal = f'"{value}"' if isinstance(value, str) else repr(value)
+            f.write(f"{option} = {literal}\n")
 
 
 def run_sweep(config_names: list[str], out_dir: str, max_parallel: int):

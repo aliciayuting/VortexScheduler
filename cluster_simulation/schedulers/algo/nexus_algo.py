@@ -1,5 +1,7 @@
 import numpy as np
 
+import core.configs.gen_config as gcfg
+
 from core.data_models.workflow import Workflow
 
 
@@ -7,6 +9,9 @@ class NexusSLOSplitter:
     """SLO split algorithm adapted from pg. 330 (sec 6.2): 
     https://homes.cs.washington.edu/~arvind/papers/nexus.pdf
     """
+
+    # granularity of SLOs in ms
+    TIME_STEP = 5
 
     @classmethod
     def get_task_arrival_rates(cls, workflow: Workflow, job_arrival_rate: float,
@@ -85,6 +90,205 @@ class NexusSLOSplitter:
 
 
     @classmethod
+    def _region_topo_order(cls, region: set[int], workflow: Workflow) -> list[int]:
+        """Returns the task IDs of [region] in topological order, following only the
+        edges that stay inside the region.
+        """
+        indeg = {tid: len([pt for pt in workflow.tasks[tid].prev_tasks if pt.id in region])
+                 for tid in region}
+
+        order = []
+        ready = sorted([tid for tid, d in indeg.items() if d == 0])
+        while ready:
+            tid = ready.pop(0)
+            order.append(tid)
+            for nt in workflow.tasks[tid].next_tasks:
+                if nt.id not in region:
+                    continue
+                indeg[nt.id] -= 1
+                if indeg[nt.id] == 0:
+                    ready.append(nt.id)
+
+        assert(len(order) == len(region))
+
+        return order
+
+
+    @classmethod
+    def _region_duration(cls, region: set[int], workflow: Workflow,
+                         budgets: dict[int, float]) -> float:
+        """Returns the largest total budget along any path through [region], i.e.
+        how long the region takes when every stage spends its whole budget.
+        """
+        longest = {}
+        for tid in cls._region_topo_order(region, workflow):
+            spent = max([longest[pt.id] for pt in workflow.tasks[tid].prev_tasks
+                         if pt.id in region], default=0)
+            longest[tid] = spent + budgets[tid]
+
+        return max(longest.values(), default=0)
+
+
+    @classmethod
+    def _region_branches(cls, region: set[int], workflow: Workflow) -> list[set[int]]:
+        """Splits [region] into the independent branches it is made of: its weakly
+        connected components, which for a fork-join graph are exactly the parallel
+        paths between the fork and the join that bound the region.
+        """
+        branches = []
+        remaining = set(region)
+        while remaining:
+            branch = {min(remaining)}
+            frontier = list(branch)
+            while frontier:
+                task = workflow.tasks[frontier.pop()]
+                for nb in task.prev_tasks + task.next_tasks:
+                    if nb.id in region and nb.id not in branch:
+                        branch.add(nb.id)
+                        frontier.append(nb.id)
+
+            branches.append(branch)
+            remaining -= branch
+
+        return branches
+
+
+    @classmethod
+    def _series_elements(cls, region: set[int],
+                         workflow: Workflow) -> list[tuple[str, object]]:
+        """Decomposes [region] into the sequence of elements that every path through
+        it crosses, in order.
+
+        An element is either ("task", task_id) for a stage that lies on every path
+        through the region, or ("parallel", {task ids}) for the group of stages
+        sitting between two such stages, which different paths cross differently.
+        Since every path crosses every element, the region's duration is the SUM over
+        elements, while a parallel element's own duration is the MAX over its
+        branches: the two rules a proportional stretch has to respect.
+
+        Found by sweeping the region in topological order and tracking how many edges
+        cross the cut just behind the sweep. A stage lies on every path exactly when
+        the only edges crossing the cut in front of it are its own incoming ones.
+        """
+        indeg, outdeg = {}, {}
+        for tid in region:
+            task = workflow.tasks[tid]
+            # a region source is entered once, from the fork bounding the region;
+            # a region sink likewise leaves once, into the join
+            indeg[tid] = max(1, len([pt for pt in task.prev_tasks if pt.id in region]))
+            outdeg[tid] = max(1, len([nt for nt in task.next_tasks if nt.id in region]))
+
+        elements = []
+        group = []
+        cut = len([tid for tid in region
+                   if not any(pt.id in region for pt in workflow.tasks[tid].prev_tasks)])
+
+        for tid in cls._region_topo_order(region, workflow):
+            if cut == indeg[tid]:
+                if group:
+                    elements.append(("parallel", set(group)))
+                    group = []
+                elements.append(("task", tid))
+            else:
+                group.append(tid)
+
+            cut += outdeg[tid] - indeg[tid]
+
+        if group:
+            elements.append(("parallel", set(group)))
+
+        return elements
+
+
+    @classmethod
+    def _stretch_region(cls, region: set[int], workflow: Workflow,
+                        budgets: dict[int, float], target: float):
+        """Scales the budgets of [region] in place so the region's longest path takes
+        [target] ms, keeping the proportions the split chose.
+
+        Recurses on the region's series-parallel structure: the elements of a series
+        share [target] in proportion to what they already take, and each branch of a
+        parallel element is then stretched to that element's whole share, which is
+        what makes parallel branches come out equal.
+        """
+        elements = cls._series_elements(region, workflow)
+        durations = [budgets[payload] if kind == "task"
+                     else cls._region_duration(payload, workflow, budgets)
+                     for kind, payload in elements]
+
+        total = sum(durations)
+        if total <= 0:
+            return
+
+        # the region's longest path is the sum over its series elements, so a region
+        # is never asked to fit in less than it already takes
+        assert(target >= total)
+        scale = target / total
+
+        for (kind, payload), duration in zip(elements, durations):
+            # keep budgets on the DP's grid, rounding down so the stretched path
+            # cannot overshoot [target]
+            share = int(duration * scale) // cls.TIME_STEP * cls.TIME_STEP
+
+            if kind == "task":
+                budgets[payload] = share
+            else:
+                for branch in cls._region_branches(payload, workflow):
+                    cls._stretch_region(branch, workflow, budgets, share)
+
+
+    @classmethod
+    def equalize_parallel_stage_slos(cls, workflow: Workflow,
+                                     slos: dict[int, tuple[float, int]],
+                                     task_worker_sizes: dict[int, int]) -> dict[int, tuple[float, int]]:
+        """Spreads the slack the split leaves on parallel branches over the stages of
+        those branches, so every branch of a fan-in takes as long as the longest one.
+
+        The split sizes each stage on its own GPU cost in isolation, so on a fan-in
+        the cheap branch is handed a much smaller budget than the branch beside it.
+        The join waits for both branches regardless, so the difference is slack that
+        no stage is allowed to spend: the cheap branch's stage deadlines fire early
+        for no reason, and the batch caps they imply are smaller than the job SLO
+        actually requires.
+
+        The slack cannot simply be handed to each stage that has some, because stages
+        on nested branches draw on the same room as the fork above them and would
+        spend it twice. It is instead pushed down the workflow's series-parallel
+        structure (see [_stretch_region]), which gives each branch of a fan-in the
+        same total while dividing that total among the branch's own stages in the
+        proportions the split chose for them. The longest path is left exactly as it
+        was, so no deadline moves outward and the job SLO still bounds the split.
+
+        Args:
+            workflow: Workflow whose split to stretch
+            slos: (stage SLO, max batch size) per task ID, as produced by
+            [generate_task_slos]
+            task_worker_sizes: Task ID -> worker memory size whose batch exec times
+            to plan against (GB), as produced by [get_task_worker_sizes]
+
+        Returns:
+            slos: (stage SLO, max batch size) per task ID, stretched in place
+        """
+        region = set(workflow.tasks.keys())
+        budgets = {tid: slo for tid, (slo, _) in slos.items()}
+
+        critical_path = cls._region_duration(region, workflow, budgets)
+        cls._stretch_region(region, workflow, budgets, critical_path)
+
+        # stretching only ever spends slack that was already inside the workflow
+        assert(cls._region_duration(region, workflow, budgets) <= critical_path)
+
+        for tid, budget in budgets.items():
+            assert(budget >= slos[tid][0])
+            slos[tid] = (budget,
+                         cls._max_feasible_batch_size(workflow.tasks[tid].model_data,
+                                                      task_worker_sizes[tid],
+                                                      budget))
+
+        return slos
+
+
+    @classmethod
     def generate_task_slos(cls, workflow: Workflow, slo: float,
                            task_arrival_rates: dict[int, float],
                            task_worker_sizes: dict[int, int]) -> dict[int, tuple[float, int]]:
@@ -102,8 +306,7 @@ class NexusSLOSplitter:
             task_slos: (SLO, max batch size) for each task ID in workflow
         """
 
-        # granularity of SLOs in ms
-        TIME_STEP = 5
+        TIME_STEP = cls.TIME_STEP
 
         slo = int(slo)
         assert(slo >= TIME_STEP)
@@ -205,6 +408,9 @@ class NexusSLOSplitter:
                              cls._max_feasible_batch_size(workflow.tasks[tid].model_data,
                                                           task_worker_sizes[tid],
                                                           scaled_slo))
+
+        if gcfg.EQUALIZE_PARALLEL_STAGE_SLOS:
+            slos = cls.equalize_parallel_stage_slos(workflow, slos, task_worker_sizes)
 
         return slos
 
