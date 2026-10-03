@@ -151,9 +151,13 @@ class Workload:
         self.trace_arrival_times: list[float] = []
 
         if self.arrival_process == "ALITRACE":
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
             if self.trace_file_path is None:
-                repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
                 self.trace_file_path = os.path.join(repo_root, "workflow", "azuretrace", "llm_az_processed_trace.csv")
+            elif not os.path.isabs(os.path.expanduser(self.trace_file_path)):
+                # Keep trace configurations portable and independent of the
+                # directory from which run_experiment.py is launched.
+                self.trace_file_path = os.path.join(repo_root, self.trace_file_path)
             self.trace_arrival_times = self._load_trace_arrivals(self.trace_file_path)
             duration = max(float(self.trace_arrival_times[-1] - self.trace_arrival_times[0]) if len(self.trace_arrival_times) > 1 else 1.0, 1.0)
             self.phases = [WorkloadPhase({"KIND": "CONSTANT", "RATE": self.mean_rate(), "DURATION": duration})]

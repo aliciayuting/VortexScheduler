@@ -1,6 +1,49 @@
 import numpy as np
 
 
+def _build_object_defect_tasks():
+    """Build the 3-round/8-camera defect-inspection fan-out and fan-in DAG.
+
+    Every captured image is independently sent to both YOLOv5 detectors.  The
+    final task is released only after all 24 * 2 detection results are ready.
+    ROUND and CAMERA_ID are descriptive metadata; the simulator uses the task
+    dependency fields to execute the graph.
+    """
+    image_size_kb = 1000
+    detection_result_size_kb = 10
+    detector_tasks = []
+
+    for round_id in range(1, 4):
+        for camera_id in range(1, 9):
+            for detector, model_id in (("crack", 17), ("hole", 18)):
+                task_index = len(detector_tasks)
+                detector_tasks.append({
+                    "MODEL_ID": model_id,
+                    "TASK_INDEX": task_index,
+                    "PREV_TASK_INDEX": [],
+                    "NEXT_TASK_INDEX": [48],
+                    "INPUT_SIZE": image_size_kb,
+                    "OUTPUT_SIZE": detection_result_size_kb,
+                    "SLO": 0,
+                    "ROUND": round_id,
+                    "CAMERA_ID": camera_id,
+                    "DETECTOR": detector,
+                })
+
+    detector_tasks.append({
+        "MODEL_ID": 19,
+        "TASK_INDEX": 48,
+        "PREV_TASK_INDEX": list(range(48)),
+        "NEXT_TASK_INDEX": [],
+        "INPUT_SIZE": 48 * detection_result_size_kb,
+        "OUTPUT_SIZE": detection_result_size_kb,
+        "SLO": 0,
+        "AGGREGATES_RESULTS": 48,
+        "IMAGE_COUNT": 24,
+    })
+    return detector_tasks
+
+
 """  --------       Workflow Parameters     --------  """
 # https://keras.io/api/applications/
 WORKFLOW_LIST = [
@@ -447,6 +490,12 @@ WORKFLOW_LIST = [
          "OUTPUT_SIZE": 30000,
          "SLO": 0},
         ]
+    },
+    {"JOB_TYPE": 12,     # IIT defect-inspection workflow: 3 rounds x 8 cameras x 2 YOLOv5 detectors
+     "JOB_NAME": "object_defect_inspection",
+     "DESCRIPTION": ("3 rounds x 8 cameras x 2 YOLOv5 detectors; "
+                     "aggregate 48 results from 24 images"),
+     "TASKS": _build_object_defect_tasks(),
     },
 ]
 

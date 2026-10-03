@@ -185,4 +185,40 @@ MODELS = [
         },
         "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
     },
+    {
+        # model id 17 -- baseline profile; replace with measured crack-model data
+        "MODEL_NAME": "yolov5_crack_detection",
+        "MODEL_SIZE": 15000,  # in kB
+        "MAX_BATCH_SIZE": 8,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: {1: 10.0, 2: 16.0, 3: 22.0, 4: 28.0, 5: 34.0, 6: 40.0, 7: 46.0, 8: 52.0},
+            12: {1: 8.0, 2: 13.0, 3: 18.0, 4: 23.0, 5: 28.0, 6: 33.0, 7: 38.0, 8: 43.0},
+            24: {1: 6.0, 2: 10.0, 3: 14.0, 4: 18.0, 5: 22.0, 6: 26.0, 7: 30.0, 8: 34.0},
+        },
+        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+    },
+    {
+        # model id 18 -- baseline profile; replace with measured hole-model data
+        "MODEL_NAME": "yolov5_hole_detection",
+        "MODEL_SIZE": 15000,  # in kB
+        "MAX_BATCH_SIZE": 8,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: {1: 10.0, 2: 16.0, 3: 22.0, 4: 28.0, 5: 34.0, 6: 40.0, 7: 46.0, 8: 52.0},
+            12: {1: 8.0, 2: 13.0, 3: 18.0, 4: 23.0, 5: 28.0, 6: 33.0, 7: 38.0, 8: 43.0},
+            24: {1: 6.0, 2: 10.0, 3: 14.0, 4: 18.0, 5: 22.0, 6: 26.0, 7: 30.0, 8: 34.0},
+        },
+        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+    },
+    {
+        # model id 19
+        "MODEL_NAME": "aggregate_defect_results",
+        "MODEL_SIZE": 0,  # in kB
+        "MAX_BATCH_SIZE": 1,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: {1: 1.0},
+            12: {1: 1.0},
+            24: {1: 1.0},
+        },
+        "EXEC_TIME_CVS": {6: 0.05, 12: 0.05, 24: 0.05},
+    },
 ]
