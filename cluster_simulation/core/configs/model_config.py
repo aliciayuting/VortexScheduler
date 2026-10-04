@@ -1,3 +1,15 @@
+# YOLOv5 benchmark data with piecewise-linear interpolation for unmeasured
+# integer batch sizes. The supplied measurements are retained exactly.
+YOLOV5_BATCH_EXEC_TIMES = {
+    1: 5.8, 2: 6.2, 3: 6.6, 4: 7.0,
+    5: 8.65, 6: 10.3, 7: 11.95, 8: 13.6,
+    9: 15.225, 10: 16.85, 11: 18.475, 12: 20.1,
+    13: 21.725, 14: 23.35, 15: 24.975, 16: 26.6,
+    17: 28.225, 18: 29.85, 19: 31.475, 20: 33.1,
+    21: 34.75, 22: 36.4, 23: 38.05, 24: 39.7,
+}
+
+
 # NOTE: model_id = index in MODELS
 MODELS = [
     {
@@ -186,26 +198,26 @@ MODELS = [
         "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
     },
     {
-        # model id 17 -- baseline profile; replace with measured crack-model data
+        # model id 17
         "MODEL_NAME": "yolov5_crack_detection",
         "MODEL_SIZE": 15000,  # in kB
-        "MAX_BATCH_SIZE": 8,
+        "MAX_BATCH_SIZE": 24,
         "MIG_BATCH_EXEC_TIMES": {
-            6: {1: 10.0, 2: 16.0, 3: 22.0, 4: 28.0, 5: 34.0, 6: 40.0, 7: 46.0, 8: 52.0},
-            12: {1: 8.0, 2: 13.0, 3: 18.0, 4: 23.0, 5: 28.0, 6: 33.0, 7: 38.0, 8: 43.0},
-            24: {1: 6.0, 2: 10.0, 3: 14.0, 4: 18.0, 5: 22.0, 6: 26.0, 7: 30.0, 8: 34.0},
+            6: YOLOV5_BATCH_EXEC_TIMES.copy(),
+            12: YOLOV5_BATCH_EXEC_TIMES.copy(),
+            24: YOLOV5_BATCH_EXEC_TIMES.copy(),
         },
         "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
     },
     {
-        # model id 18 -- baseline profile; replace with measured hole-model data
+        # model id 18
         "MODEL_NAME": "yolov5_hole_detection",
         "MODEL_SIZE": 15000,  # in kB
-        "MAX_BATCH_SIZE": 8,
+        "MAX_BATCH_SIZE": 24,
         "MIG_BATCH_EXEC_TIMES": {
-            6: {1: 10.0, 2: 16.0, 3: 22.0, 4: 28.0, 5: 34.0, 6: 40.0, 7: 46.0, 8: 52.0},
-            12: {1: 8.0, 2: 13.0, 3: 18.0, 4: 23.0, 5: 28.0, 6: 33.0, 7: 38.0, 8: 43.0},
-            24: {1: 6.0, 2: 10.0, 3: 14.0, 4: 18.0, 5: 22.0, 6: 26.0, 7: 30.0, 8: 34.0},
+            6: YOLOV5_BATCH_EXEC_TIMES.copy(),
+            12: YOLOV5_BATCH_EXEC_TIMES.copy(),
+            24: YOLOV5_BATCH_EXEC_TIMES.copy(),
         },
         "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
     },
