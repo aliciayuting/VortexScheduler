@@ -43,8 +43,8 @@ MAX_NUM_MODELS_PER_NODE = 4
 # arrivals more tightly than Poisson does, below 1 spreads them more evenly.
 
 CLIENT_CONFIGS = [
-    # WF12: object defect inspection (3 rounds x 8 cameras x 2 detectors)
-    {12: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    # WF13: dairy cow teat health detection
+    {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
                        "PHASES": [{"KIND": "CONSTANT", "RATE": 1, "NUM_JOBS": 10}]},
           "SLO": 3000}},
 
@@ -226,7 +226,7 @@ ENABLE_NETWORKING_DELAYS = False
 # NOTE: LARGEST_FEASIBLE is not wired up -- see TaskBatcher.get_batch
 BATCH_POLICY = "LARGEST"
 FALLBACK_TO_LARGEST_BATCH = True
-DISABLE_BATCHING = True  # WF12 has parallel same-model tasks from the same job
+DISABLE_BATCHING = True  # WF13 has parallel same-model tasks from the same job
 
 # NONE | LAZY | EARLY | LOOKAHEAD
 DROP_POLICY = "NONE"
@@ -264,9 +264,11 @@ AUTOSCALING_POLICY = "NONE"
 # HERD | CUSTOM | INFERLINE
 ALLOCATION_STRATEGY = "CUSTOM"
 
-# WF12 alloc (object defect inspection)
+# WF13 alloc (dairy cow teat health detection)
 CUSTOM_ALLOCATION = [
-    (24, [17, 18, 19]),
+    (24, [20, 21, 24]),
+    (6, [22]), (6, [22]), (6, [22]), (6, [22]),
+    (6, [23]), (6, [23]), (6, [23]), (6, [23]),
 ]
 
 # WF6/10/11 alloc (textvision variants)
