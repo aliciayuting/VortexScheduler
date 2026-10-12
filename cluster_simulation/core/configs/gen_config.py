@@ -225,6 +225,10 @@ DISABLE_BATCHING = False  # always run batch size 1 when True
 
 # NONE | LAZY | EARLY | LOOKAHEAD
 DROP_POLICY = "NONE"
+
+# LOOKAHEAD only: charge a queued task for its model's whole backlog rather than
+# only the tasks ahead of it in queue order
+LOOKAHEAD_WHOLE_QUEUE_DELAY = False
 SLO_SLACK = 0
 
 # JOB_LEVEL | NEXUS_SPLIT (batch caps not enforced) | NEXUS

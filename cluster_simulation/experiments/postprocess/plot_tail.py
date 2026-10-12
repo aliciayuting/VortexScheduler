@@ -147,9 +147,57 @@ def _load_sources(srcs: list[tuple[str, str]],
     return loaded_srcs, max_res
 
 
+# hues the groups are drawn from, in the order groups are first seen. Each group
+# gets a sequential ramp of one hue, so that a series' shade reads as its position
+# within its group while its hue still says which group it belongs to
+_GROUP_RAMPS = ["Blues", "Oranges", "Greens", "Purples", "Greys"]
+
+
+def _series_colors(groups: list[str] | None, count: int) -> list:
+    """Returns the colour for each series.
+
+    Without [groups] every series is its own category and takes the next
+    categorical hue, which is the right encoding when the runs being compared have
+    no order to them. With [groups] the series of a group are shades of one hue,
+    light to dark in the order given, which suits a group whose members ARE
+    ordered, such as one run per SLO.
+
+    Args:
+        groups: Group name per series, or None for one colour per series
+        count: Number of series
+
+    Returns:
+        colors: One matplotlib colour per series
+    """
+    if groups is None:
+        return list(sns.color_palette("tab10", count))
+
+    assert(len(groups) == count), \
+        f"got {len(groups)} groups for {count} sources; pass one group per source"
+
+    order = list(dict.fromkeys(groups))
+    assert(len(order) <= len(_GROUP_RAMPS)), \
+        f"only {len(_GROUP_RAMPS)} group ramps are defined, got {len(order)} groups"
+
+    colors = [None] * count
+    for position, name in enumerate(order):
+        members = [i for i, g in enumerate(groups) if g == name]
+        ramp = plt.get_cmap(_GROUP_RAMPS[position])
+
+        # stay inside the dark half of the ramp: its pale end is too close to the
+        # page to read as a line, and with one member there is no ramp to walk
+        steps = (np.linspace(0.40, 0.95, len(members)) if len(members) > 1
+                 else np.array([0.75]))
+        for step, i in zip(steps, members):
+            colors[i] = ramp(step)
+
+    return colors
+
+
 def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: bool,
                                 normalize_by_job_size: bool, save_fig: bool, out_path: str,
-                                max_job_size_multiple: float = 10):
+                                max_job_size_multiple: float = 10,
+                                groups: list[str] | None = None):
     """Plots the tail CDF of job response time for every run in [srcs].
 
     The two options are independent and may be combined:
@@ -168,8 +216,10 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
         out_path: Where to save the figure
         max_job_size_multiple: Right edge of the x axis when normalizing, so that
         runs whose SLO exceeds the default still show their tail
+        groups: Group name per run, which colours the runs of a group as shades of
+        one hue instead of giving each its own (see [_series_colors])
     """
-    palette = sns.color_palette("tab10", len(srcs))
+    palette = _series_colors(groups, len(srcs))
     loaded_srcs, max_res = _load_sources(srcs, need_job_sizes=normalize_by_job_size)
 
     if normalize_by_job_size:
@@ -214,7 +264,7 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
                 wf2ax[wf].plot(thresholds, cdf, label=name, color=palette[i])
 
         for ax in axes:
-            ax.legend()
+            ax.legend(ncol=2 if len(srcs) > 8 else 1, fontsize="small")
             ax.set_xlabel(xlabel)
 
         axes[0].set_ylabel("Tail CDF")
@@ -241,7 +291,7 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
         plt.title("Tail CDF")
         plt.grid(True, which="both")
         plt.yscale("log")
-        plt.legend()
+        plt.legend(ncol=2 if len(srcs) > 8 else 1, fontsize="small")
         plt.tight_layout()
 
     if save_fig:
@@ -266,6 +316,10 @@ if __name__ == "__main__":
     parser.add_argument("--xmax", type=float, default=10,
                         help="With --normalize, the right edge of the x axis in "
                              "multiples of job size (default: 10)")
+    parser.add_argument("--groups", type=str, nargs="+",
+                        help="Group name per source. Sources sharing a group are "
+                             "drawn as shades of one hue, light to dark in the "
+                             "order given, rather than each taking its own hue")
     parser.add_argument("--normalize", action="store_true",
                         help="Normalize response time to a multiple of job size (the "
                              "workflow's critical path at batch size 1) instead of "
@@ -284,4 +338,4 @@ if __name__ == "__main__":
         out_path = "tail_by_workflow.pdf" if args.split else "tail_agg.pdf"
 
     plot_response_time_tail_cdf(srcs, args.split, args.normalize, args.pdf, out_path,
-                                args.xmax)
+                                args.xmax, args.groups)
