@@ -82,6 +82,26 @@ SWEEP_CONFIGS = {
                                "ADMISSION_GRANULARITY": "TASK",
                                "ADMISSION_BURST_SIZE": 5},
 
+    # the same token bucket configurations with the workflows sharing one budget
+    # instead of holding one each: the cluster admits the same total rate, but a
+    # bursting tenant may spend the tokens the others left unused. Only differs
+    # from the per-workflow runs above on a multitenant workload
+    "central_rr_token_agg": {"DROP_POLICY": "NONE",
+                             "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
+                             "ADMISSION_BUCKET_SCOPE": "AGGREGATE",
+                             "ADMISSION_BURST_SIZE": None},
+    "central_rr_5token_agg": {"DROP_POLICY": "NONE",
+                              "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
+                              "ADMISSION_BUCKET_SCOPE": "AGGREGATE",
+                              "ADMISSION_BURST_SIZE": 5},
+    # per stage, where an aggregate bucket is held in common by every stage
+    # running on the same model, at that model's whole capacity
+    "central_rr_token_task_agg": {"DROP_POLICY": "NONE",
+                                  "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
+                                  "ADMISSION_GRANULARITY": "TASK",
+                                  "ADMISSION_BUCKET_SCOPE": "AGGREGATE",
+                                  "ADMISSION_BURST_SIZE": None},
+
     # the three token bucket configurations repeated at a higher target
     # utilization, i.e. admitting a larger fraction of estimated capacity
     "central_rr_token_95": {"DROP_POLICY": "NONE",
