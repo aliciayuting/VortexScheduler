@@ -1,14 +1,13 @@
-# YOLOv5 benchmark data with piecewise-linear interpolation for unmeasured
-# integer batch sizes. The supplied measurements are retained exactly.
 YOLOV5_BATCH_EXEC_TIMES = {
-    1: 5.8, 2: 6.2, 3: 6.6, 4: 7.0,
-    5: 8.65, 6: 10.3, 7: 11.95, 8: 13.6,
-    9: 15.225, 10: 16.85, 11: 18.475, 12: 20.1,
-    13: 21.725, 14: 23.35, 15: 24.975, 16: 26.6,
-    17: 28.225, 18: 29.85, 19: 31.475, 20: 33.1,
-    21: 34.75, 22: 36.4, 23: 38.05, 24: 39.7,
+    1: 14.7, 2: 20.1, 3: 23.6, 4: 30.3,
+    5: 37.8, 6: 40.2, 7: 47.8, 8: 52.5,
+    9: 58.5, 10: 64.6, 11: 70.1, 12: 75.6,
+    13: 82.9, 14: 90.3, 15: 96.5, 16: 102.8,
+    17: 108.2, 18: 113.7, 19: 119.1, 20: 124.6,
+    21: 131.3, 22: 138.1, 23: 144.8, 24: 151.5,
+    25: 157.9, 26: 164.3, 27: 170.7, 28: 177.2,
+    29: 183.6, 30: 190.0, 31: 196.4, 32: 202.8
 }
-
 
 # NOTE: model_id = index in MODELS
 MODELS = [
@@ -64,7 +63,7 @@ MODELS = [
                  5: 108.49, 6: 136.14, 7: 153.81, 8: 175.46,
                  9: 200.74, 10: 228.27, 11: 245.03, 12: 259.32,
                  13: 283.92, 14: 307.50, 15: 329.19, 16: 347.88}},
-        "EXEC_TIME_CVS": {6: 0.06, 12: 0.06, 24: 0.06}
+        "EXEC_TIME_CVS": {6: 0.12, 12: 0.12, 24: 0.12}
     },
     {
         # model id 4
@@ -97,7 +96,7 @@ MODELS = [
         "MIG_BATCH_EXEC_TIMES": {
             24: {1: 17.3, 2: 25.3}, 12: {1: 25.3, 2: 44.2}
         },
-        "EXEC_TIME_CVS": {6: 0.06, 12: 0.06, 24: 0.06},
+        "EXEC_TIME_CVS": {6: 0.16, 12: 0.16, 24: 0.16},
     },
     {
         # model id 7
@@ -116,7 +115,7 @@ MODELS = [
             24: {1: 6.3, 2: 7.4, 3: 12.2, 4: 24.1},
             12: {1: 6.3, 2: 7.4, 3: 12.2, 4: 24.1}
         },
-        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1} 
+        "EXEC_TIME_CVS": {6: 0.2, 12: 0.2, 24: 0.2} 
     },
     {
         # model id 9
@@ -132,7 +131,7 @@ MODELS = [
         "MODEL_SIZE": 1600000,             # in kB
         "MAX_BATCH_SIZE": 1,
         "MIG_BATCH_EXEC_TIMES": {24: {1: 238.4}},
-        "EXEC_TIME_CVS": {6: 0.05, 12: 0.05, 24: 0.05}
+        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1}
     },
     {
         # model id 11
@@ -200,26 +199,26 @@ MODELS = [
     {
         # model id 17
         "MODEL_NAME": "yolov5_crack_detection",
-        "MODEL_SIZE": 15000,  # in kB
+        "MODEL_SIZE": 5537000,  # in kB
         "MAX_BATCH_SIZE": 24,
         "MIG_BATCH_EXEC_TIMES": {
             6: YOLOV5_BATCH_EXEC_TIMES.copy(),
             12: YOLOV5_BATCH_EXEC_TIMES.copy(),
             24: YOLOV5_BATCH_EXEC_TIMES.copy(),
         },
-        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+        "EXEC_TIME_CVS": {6: 0.07, 12: 0.07, 24: 0.07},
     },
     {
         # model id 18
         "MODEL_NAME": "yolov5_hole_detection",
-        "MODEL_SIZE": 15000,  # in kB
+        "MODEL_SIZE": 5537000,  # in kB
         "MAX_BATCH_SIZE": 24,
         "MIG_BATCH_EXEC_TIMES": {
             6: YOLOV5_BATCH_EXEC_TIMES.copy(),
             12: YOLOV5_BATCH_EXEC_TIMES.copy(),
             24: YOLOV5_BATCH_EXEC_TIMES.copy(),
         },
-        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+        "EXEC_TIME_CVS": {6: 0.07, 12: 0.07, 24: 0.07},
     },
     {
         # model id 19
@@ -236,50 +235,47 @@ MODELS = [
     {
         # model id 20 -- baseline profile; replace with measured OCR data
         "MODEL_NAME": "cow_id_ocr",
-        "MODEL_SIZE": 100000,  # in kB
+        "MODEL_SIZE": 2867000,  # in kB
         "MAX_BATCH_SIZE": 4,
         "MIG_BATCH_EXEC_TIMES": {
-            6: {1: 18.0, 2: 28.0, 3: 38.0, 4: 48.0},
-            12: {1: 13.0, 2: 21.0, 3: 29.0, 4: 37.0},
-            24: {1: 10.0, 2: 16.0, 3: 22.0, 4: 28.0},
+            6: {1: 55.8, 2: 103.6, 3: 143.0, 4: 184.8},
+            12: {1: 55.8, 2: 103.6, 3: 143.0, 4: 184.8},
+            24: {1: 55.8, 2: 103.6, 3: 143.0, 4: 184.8},
         },
-        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+        "EXEC_TIME_CVS": {6: 0.04, 12: 0.04, 24: 0.04},
     },
     {
         # model id 21 -- baseline profile; replace with measured Faster R-CNN data
         "MODEL_NAME": "faster_rcnn_teat_segmentation",
-        "MODEL_SIZE": 500000,  # in kB
+        "MODEL_SIZE": 7413000,  # in kB
         "MAX_BATCH_SIZE": 4,
         "MIG_BATCH_EXEC_TIMES": {
-            6: {1: 70.0, 2: 120.0, 3: 170.0, 4: 220.0},
-            12: {1: 50.0, 2: 85.0, 3: 120.0, 4: 155.0},
-            24: {1: 35.0, 2: 60.0, 3: 85.0, 4: 110.0},
+            12: {1: 40.5, 2: 76.0, 3: 113.1, 4: 141.8},
+            24: {1: 40.5, 2: 76.0, 3: 113.1, 4: 141.8},
         },
-        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+        "EXEC_TIME_CVS": {12: 0.1, 24: 0.1},
     },
     {
-        # model id 22 -- baseline profile; replace with measured fine-tuned DINO data
+        # model id 22
         "MODEL_NAME": "dino_teat_shape_classification",
-        "MODEL_SIZE": 350000,  # in kB
-        "MAX_BATCH_SIZE": 4,
+        "MODEL_SIZE": 11200000,  # in kB
+        "MAX_BATCH_SIZE": 8,
         "MIG_BATCH_EXEC_TIMES": {
-            6: {1: 30.0, 2: 48.0, 3: 66.0, 4: 84.0},
-            12: {1: 22.0, 2: 35.0, 3: 48.0, 4: 61.0},
-            24: {1: 16.0, 2: 26.0, 3: 36.0, 4: 46.0},
+            12: {1: 12.0, 2: 17.2, 3: 23.9, 4: 27.8, 5: 32.9, 6: 37.5, 7: 43.9, 8: 48.1},
+            24: {1: 12.0, 2: 17.2, 3: 23.9, 4: 27.8, 5: 32.9, 6: 37.5, 7: 43.9, 8: 48.1},
         },
-        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+        "EXEC_TIME_CVS": {12: 0.05, 24: 0.05},
     },
     {
-        # model id 23 -- baseline profile; replace with measured fine-tuned DINO data
+        # model id 23
         "MODEL_NAME": "dino_teat_skin_condition_classification",
-        "MODEL_SIZE": 350000,  # in kB
-        "MAX_BATCH_SIZE": 4,
+        "MODEL_SIZE": 11200000,  # in kB
+        "MAX_BATCH_SIZE": 8,
         "MIG_BATCH_EXEC_TIMES": {
-            6: {1: 30.0, 2: 48.0, 3: 66.0, 4: 84.0},
-            12: {1: 22.0, 2: 35.0, 3: 48.0, 4: 61.0},
-            24: {1: 16.0, 2: 26.0, 3: 36.0, 4: 46.0},
+            12: {1: 12.0, 2: 17.2, 3: 23.9, 4: 27.8, 5: 32.9, 6: 37.5, 7: 43.9, 8: 48.1},
+            24: {1: 12.0, 2: 17.2, 3: 23.9, 4: 27.8, 5: 32.9, 6: 37.5, 7: 43.9, 8: 48.1},
         },
-        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+        "EXEC_TIME_CVS": {12: 0.05, 24: 0.05},
     },
     {
         # model id 24

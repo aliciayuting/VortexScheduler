@@ -109,9 +109,19 @@ class TaskBatcher:
         # enforced per-stage SLOs those stages may not share a cap, so the batch is
         # limited by the tightest cap among the tasks actually in it
         tasks = []
+        batched_job_ids = set()
         max_batch_size = None
         for task in task_queue:
+            # a batch holds at most one task per job, which Batch asserts and the
+            # workers' accounting relies on. A workflow that runs several of its
+            # stages on one model, or fans one stage out into parallel tasks, can
+            # have two tasks of the same job queued together; the second waits for
+            # the next batch rather than blocking the first
+            if task.job.id in batched_job_ids:
+                continue
+
             tasks.append(task)
+            batched_job_ids.add(task.job.id)
             max_batch_size = min(max_batch_size or task.get_max_batch_size(),
                                  task.get_max_batch_size())
             if len(tasks) >= max_batch_size:

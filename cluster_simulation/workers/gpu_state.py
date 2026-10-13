@@ -255,7 +255,11 @@ class GPUState(object):
         return evicted_state.model.id, evicted_batch
 
     def state_at(self, time: float) -> list[ModelState]:
-        for (timestamp, states) in self._model_states[::-1]:
+        # walked in reverse rather than over a reversed copy: the history holds one
+        # marker per state change and grows for the whole run, so copying it here
+        # costs more than the scan itself. _insert_state_marker keeps the markers in
+        # timestamp order, so the first one at or before [time] is the state in force
+        for (timestamp, states) in reversed(self._model_states):
             if timestamp <= time:
                 return states
         return []
