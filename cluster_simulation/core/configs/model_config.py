@@ -1,3 +1,15 @@
+# YOLOv5 benchmark data with piecewise-linear interpolation for unmeasured
+# integer batch sizes. The supplied measurements are retained exactly.
+YOLOV5_BATCH_EXEC_TIMES = {
+    1: 5.8, 2: 6.2, 3: 6.6, 4: 7.0,
+    5: 8.65, 6: 10.3, 7: 11.95, 8: 13.6,
+    9: 15.225, 10: 16.85, 11: 18.475, 12: 20.1,
+    13: 21.725, 14: 23.35, 15: 24.975, 16: 26.6,
+    17: 28.225, 18: 29.85, 19: 31.475, 20: 33.1,
+    21: 34.75, 22: 36.4, 23: 38.05, 24: 39.7,
+}
+
+
 # NOTE: model_id = index in MODELS
 MODELS = [
     {
@@ -184,5 +196,101 @@ MODELS = [
             6: {1: 20.0, 2: 22.0, 3: 23.9, 4: 25.9, 5: 27.9, 6: 29.9, 7: 31.8, 8: 33.8, 9: 35.8, 10: 37.7, 11: 39.7, 12: 41.7, 13: 43.7, 14: 45.6, 15: 47.6, 16: 49.6, 17: 51.5, 18: 53.5, 19: 55.5, 20: 57.5, 21: 59.4, 22: 61.4, 23: 63.4, 24: 65.3, 25: 67.3, 26: 69.3, 27: 71.3, 28: 73.2, 29: 75.2, 30: 77.2, 31: 79.1, 32: 81.1}
         },
         "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+    },
+    {
+        # model id 17
+        "MODEL_NAME": "yolov5_crack_detection",
+        "MODEL_SIZE": 15000,  # in kB
+        "MAX_BATCH_SIZE": 24,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: YOLOV5_BATCH_EXEC_TIMES.copy(),
+            12: YOLOV5_BATCH_EXEC_TIMES.copy(),
+            24: YOLOV5_BATCH_EXEC_TIMES.copy(),
+        },
+        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+    },
+    {
+        # model id 18
+        "MODEL_NAME": "yolov5_hole_detection",
+        "MODEL_SIZE": 15000,  # in kB
+        "MAX_BATCH_SIZE": 24,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: YOLOV5_BATCH_EXEC_TIMES.copy(),
+            12: YOLOV5_BATCH_EXEC_TIMES.copy(),
+            24: YOLOV5_BATCH_EXEC_TIMES.copy(),
+        },
+        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+    },
+    {
+        # model id 19
+        "MODEL_NAME": "aggregate_defect_results",
+        "MODEL_SIZE": 0,  # in kB
+        "MAX_BATCH_SIZE": 1,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: {1: 1.0},
+            12: {1: 1.0},
+            24: {1: 1.0},
+        },
+        "EXEC_TIME_CVS": {6: 0.05, 12: 0.05, 24: 0.05},
+    },
+    {
+        # model id 20 -- baseline profile; replace with measured OCR data
+        "MODEL_NAME": "cow_id_ocr",
+        "MODEL_SIZE": 100000,  # in kB
+        "MAX_BATCH_SIZE": 4,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: {1: 18.0, 2: 28.0, 3: 38.0, 4: 48.0},
+            12: {1: 13.0, 2: 21.0, 3: 29.0, 4: 37.0},
+            24: {1: 10.0, 2: 16.0, 3: 22.0, 4: 28.0},
+        },
+        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+    },
+    {
+        # model id 21 -- baseline profile; replace with measured Faster R-CNN data
+        "MODEL_NAME": "faster_rcnn_teat_segmentation",
+        "MODEL_SIZE": 500000,  # in kB
+        "MAX_BATCH_SIZE": 4,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: {1: 70.0, 2: 120.0, 3: 170.0, 4: 220.0},
+            12: {1: 50.0, 2: 85.0, 3: 120.0, 4: 155.0},
+            24: {1: 35.0, 2: 60.0, 3: 85.0, 4: 110.0},
+        },
+        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+    },
+    {
+        # model id 22 -- baseline profile; replace with measured fine-tuned DINO data
+        "MODEL_NAME": "dino_teat_shape_classification",
+        "MODEL_SIZE": 350000,  # in kB
+        "MAX_BATCH_SIZE": 4,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: {1: 30.0, 2: 48.0, 3: 66.0, 4: 84.0},
+            12: {1: 22.0, 2: 35.0, 3: 48.0, 4: 61.0},
+            24: {1: 16.0, 2: 26.0, 3: 36.0, 4: 46.0},
+        },
+        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+    },
+    {
+        # model id 23 -- baseline profile; replace with measured fine-tuned DINO data
+        "MODEL_NAME": "dino_teat_skin_condition_classification",
+        "MODEL_SIZE": 350000,  # in kB
+        "MAX_BATCH_SIZE": 4,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: {1: 30.0, 2: 48.0, 3: 66.0, 4: 84.0},
+            12: {1: 22.0, 2: 35.0, 3: 48.0, 4: 61.0},
+            24: {1: 16.0, 2: 26.0, 3: 36.0, 4: 46.0},
+        },
+        "EXEC_TIME_CVS": {6: 0.1, 12: 0.1, 24: 0.1},
+    },
+    {
+        # model id 24
+        "MODEL_NAME": "aggregate_cow_teat_health",
+        "MODEL_SIZE": 0,  # in kB
+        "MAX_BATCH_SIZE": 1,
+        "MIG_BATCH_EXEC_TIMES": {
+            6: {1: 1.0},
+            12: {1: 1.0},
+            24: {1: 1.0},
+        },
+        "EXEC_TIME_CVS": {6: 0.05, 12: 0.05, 24: 0.05},
     },
 ]
