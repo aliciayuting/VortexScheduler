@@ -1,6 +1,98 @@
 import numpy as np
 
 
+def _build_object_defect_tasks():
+    """Build the 3-round/8-camera defect-inspection fan-out and fan-in DAG.
+
+    Every captured image is independently sent to both YOLOv5 detectors.  The
+    final task is released only after all 24 * 2 detection results are ready.
+    ROUND and CAMERA_ID are descriptive metadata; the simulator uses the task
+    dependency fields to execute the graph.
+    """
+    image_size_kb = 1000
+    detection_result_size_kb = 10
+    detector_tasks = []
+
+    for round_id in range(1, 4):
+        for camera_id in range(1, 9):
+            for detector, model_id in (("crack", 17), ("hole", 18)):
+                task_index = len(detector_tasks)
+                detector_tasks.append({
+                    "MODEL_ID": model_id,
+                    "TASK_INDEX": task_index,
+                    "PREV_TASK_INDEX": [],
+                    "NEXT_TASK_INDEX": [48],
+                    "INPUT_SIZE": image_size_kb,
+                    "OUTPUT_SIZE": detection_result_size_kb,
+                    "SLO": 0,
+                    "ROUND": round_id,
+                    "CAMERA_ID": camera_id,
+                    "DETECTOR": detector,
+                })
+
+    detector_tasks.append({
+        "MODEL_ID": 19,
+        "TASK_INDEX": 48,
+        "PREV_TASK_INDEX": list(range(48)),
+        "NEXT_TASK_INDEX": [],
+        "INPUT_SIZE": 48 * detection_result_size_kb,
+        "OUTPUT_SIZE": detection_result_size_kb,
+        "SLO": 0,
+        "AGGREGATES_RESULTS": 48,
+        "IMAGE_COUNT": 24,
+    })
+    return detector_tasks
+
+
+def _build_cow_teat_health_tasks():
+    """Build the cow-ID and four-subframe teat-health inspection DAG."""
+    image_size_kb = 1000
+    result_size_kb = 10
+    aggregate_task_index = 10
+
+    tasks = [
+        {"MODEL_ID": 20, "TASK_INDEX": 0,
+         "PREV_TASK_INDEX": [], "NEXT_TASK_INDEX": [aggregate_task_index],
+         "INPUT_SIZE": image_size_kb, "OUTPUT_SIZE": result_size_kb,
+         "SLO": 0, "STAGE": "cow_id_ocr"},
+        {"MODEL_ID": 21, "TASK_INDEX": 1,
+         "PREV_TASK_INDEX": [], "NEXT_TASK_INDEX": list(range(2, 10)),
+         "INPUT_SIZE": image_size_kb, "OUTPUT_SIZE": 4 * image_size_kb,
+         "SLO": 0, "STAGE": "teat_subframe_segmentation",
+         "SUBFRAME_COUNT": 4},
+    ]
+
+    for subframe_id in range(1, 5):
+        for classifier, model_id in (("teat_shape", 22),
+                                     ("teat_skin_condition", 23)):
+            task_index = len(tasks)
+            tasks.append({
+                "MODEL_ID": model_id,
+                "TASK_INDEX": task_index,
+                "PREV_TASK_INDEX": [1],
+                "NEXT_TASK_INDEX": [aggregate_task_index],
+                "INPUT_SIZE": image_size_kb,
+                "OUTPUT_SIZE": result_size_kb,
+                "SLO": 0,
+                "SUBFRAME_ID": subframe_id,
+                "CLASSIFIER": classifier,
+            })
+
+    classification_task_indexes = list(range(2, 10))
+    tasks.append({
+        "MODEL_ID": 24,
+        "TASK_INDEX": aggregate_task_index,
+        "PREV_TASK_INDEX": [0] + classification_task_indexes,
+        "NEXT_TASK_INDEX": [],
+        "INPUT_SIZE": 9 * result_size_kb,
+        "OUTPUT_SIZE": result_size_kb,
+        "SLO": 0,
+        "STAGE": "aggregate_cow_teat_health",
+        "AGGREGATES_RESULTS": 9,
+    })
+    return tasks
+
+
 """  --------       Workflow Parameters     --------  """
 # https://keras.io/api/applications/
 WORKFLOW_LIST = [
@@ -447,6 +539,18 @@ WORKFLOW_LIST = [
          "OUTPUT_SIZE": 30000,
          "SLO": 0},
         ]
+    },
+    {"JOB_TYPE": 12,     # IIT defect-inspection workflow: 3 rounds x 8 cameras x 2 YOLOv5 detectors
+     "JOB_NAME": "object_defect_inspection",
+     "DESCRIPTION": ("3 rounds x 8 cameras x 2 YOLOv5 detectors; "
+                     "aggregate 48 results from 24 images"),
+     "TASKS": _build_object_defect_tasks(),
+    },
+    {"JOB_TYPE": 13,
+     "JOB_NAME": "cow_teat_health_detection",
+     "DESCRIPTION": ("OCR cow ID in parallel with Faster R-CNN segmentation; "
+                     "classify shape and skin condition for four teat subframes"),
+     "TASKS": _build_cow_teat_health_tasks(),
     },
 ]
 

@@ -208,13 +208,13 @@ class Simulation:
         """Splits each configured workflow's job SLO across its pipeline stages,
         giving every task its own deadline. Runs once at setup, after model
         placement is known, since the split depends on how many workers host each
-        model. No-op unless SLO_TYPE is NEXUS.
+        model. No-op unless SLO_TYPE splits the SLO across stages.
 
         One Workflow object is shared by every client sending it, so the split is
         planned for the heaviest load that workflow can see: the sum of its
         clients' peak send rates.
         """
-        if gcfg.SLO_TYPE != "NEXUS":
+        if gcfg.SLO_TYPE == "JOB_LEVEL":
             return
 
         peak_rates = get_workflow_peak_rates()
@@ -308,9 +308,10 @@ class Simulation:
 
     def _produce_nexus_slo_split_log(self):
         """Writes the per-stage SLO split that NexusSLOSplitter produced for each
-        workflow. No-op unless SLO_TYPE is NEXUS, since no split exists otherwise.
+        workflow. No-op unless SLO_TYPE splits the SLO across stages, since no split
+        exists otherwise.
         """
-        if gcfg.SLO_TYPE != "NEXUS":
+        if gcfg.SLO_TYPE == "JOB_LEVEL":
             return
 
         slo_df = pd.DataFrame(columns=["workflow_id", "task_id", "model_id", "job_slo",

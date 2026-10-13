@@ -58,7 +58,7 @@ def get_remaining_processing_time(task: Task, worker_size: int | None = None) ->
         exec times to read. Callers that do not know where the task will run pass
         None, and the slowest worker size the model is profiled for is assumed.
     """
-    if gcfg.SLO_TYPE == "NEXUS":
+    if gcfg.SLO_TYPE != "JOB_LEVEL":
         exec_times = task.model_data.batch_exec_times
         if worker_size is not None and worker_size in exec_times:
             return exec_times[worker_size][1]
@@ -70,7 +70,8 @@ def get_remaining_processing_time(task: Task, worker_size: int | None = None) ->
 
 
 def get_remaining_time_with_queueing(time: float, task: Task, load_view,
-                                     worker_size: int | None = None) -> float:
+                                     worker_size: int | None = None,
+                                     priority: float | None = None) -> float:
     """Returns how long [task]'s job still needs before its deadline can be met,
     counting the time its remaining stages will spend waiting behind work the
     cluster has already accepted.
@@ -86,6 +87,13 @@ def get_remaining_time_with_queueing(time: float, task: Task, load_view,
     The walk mirrors [_get_processing_time]: stages that can run in parallel are
     charged the slowest of them, since a join waits for its last incoming branch.
 
+    [task] is charged only for the work its own queue serves ahead of it, since
+    that is all it waits for. Its later stages are charged their model's whole
+    backlog, which is the right question for a task that has not been queued yet:
+    it will arrive at the back of that queue. A stage of the same job that is
+    queued in parallel with [task] is charged the whole backlog too, since this
+    call sees only [task]'s own place in line.
+
     Args:
         time: Time at which the estimate is made
         task: Task whose job's remaining work to measure
@@ -93,6 +101,9 @@ def get_remaining_time_with_queueing(time: float, task: Task, load_view,
         worker_size: Memory size (GB) of the worker holding the task, whose batch
         exec times to read for this stage. None assumes the slowest worker size
         the model is profiled for.
+        priority: Queue priority [task] holds in the queue it is waiting in, which
+        fixes how much of that queue it waits for. None if it is not queued yet,
+        and is therefore behind all of it
 
     Returns:
         remaining: Time still needed, including queueing (ms)
@@ -104,8 +115,8 @@ def get_remaining_time_with_queueing(time: float, task: Task, load_view,
 
         return get_min_exec_time(model_data)
 
-    if gcfg.SLO_TYPE == "NEXUS":
-        return (load_view.get_queue_delay(task.model_data.id, time)
+    if gcfg.SLO_TYPE != "JOB_LEVEL":
+        return (load_view.get_queue_delay(task.model_data.id, time, priority)
                 + _exec_time(task.model_data, True))
 
     job = task.job
@@ -126,7 +137,9 @@ def get_remaining_time_with_queueing(time: float, task: Task, load_view,
         # every stage in this wave waits out its own model's backlog, and the wave
         # is not done until its slowest stage is
         remaining += max(
-            load_view.get_queue_delay(t.model_data.id, time)
+            load_view.get_queue_delay(
+                t.model_data.id, time,
+                priority if t.task_id == task.task_id else None)
             + _exec_time(t.model_data, t.task_id == task.task_id)
             for t in available)
 
@@ -143,7 +156,8 @@ def get_remaining_time_with_queueing(time: float, task: Task, load_view,
 
 
 def _drops_task(policy: str, time: float, task: Task,
-                worker_size: int | None = None, load_view=None) -> bool:
+                worker_size: int | None = None, load_view=None,
+                priority: float | None = None) -> bool:
     """Decides whether [policy] would drop the job owning [task] at [time].
 
     The applicable deadline comes from [task.get_task_deadline]: the job deadline
@@ -174,6 +188,8 @@ def _drops_task(policy: str, time: float, task: Task,
         [get_remaining_processing_time])
         load_view: ClusterLoadView describing the work already in the system.
         Required by the policies in [_LOAD_AWARE_POLICIES], unused by the others
+        priority: Queue priority of [task] where it is queued, if it is (see
+        [get_remaining_time_with_queueing]). Unused by the other policies
 
     Returns:
         should_drop: True if the policy would drop the job
@@ -190,7 +206,8 @@ def _drops_task(policy: str, time: float, task: Task,
     elif policy == "LOOKAHEAD":
         assert(load_view is not None), \
             "LOOKAHEAD needs a ClusterLoadView to see the work already in the system"
-        remaining = get_remaining_time_with_queueing(time, task, load_view, worker_size)
+        remaining = get_remaining_time_with_queueing(time, task, load_view,
+                                                     worker_size, priority)
         return (time + remaining) > deadline
 
     raise ValueError(f"Unrecognized drop policy {policy}")
@@ -202,20 +219,21 @@ def needs_load_view(policy: str) -> bool:
 
 
 def should_drop_task(time: float, task: Task, worker_size: int | None = None,
-                     load_view=None) -> bool:
+                     load_view=None, priority: float | None = None) -> bool:
     """Whether the job owning [task] should be dropped at [time] under DROP_POLICY,
     i.e. whether it is actually removed from the cluster. See [_drops_task].
     """
-    return _drops_task(gcfg.DROP_POLICY, time, task, worker_size, load_view)
+    return _drops_task(gcfg.DROP_POLICY, time, task, worker_size, load_view, priority)
 
 
 def should_shadow_drop_task(time: float, task: Task, worker_size: int | None = None,
-                            load_view=None) -> bool:
+                            load_view=None, priority: float | None = None) -> bool:
     """Whether SHADOW_DROP_POLICY would have dropped the job owning [task] at
     [time]. The job keeps running either way; the answer is only recorded. See
     [_drops_task].
     """
-    return _drops_task(gcfg.SHADOW_DROP_POLICY, time, task, worker_size, load_view)
+    return _drops_task(gcfg.SHADOW_DROP_POLICY, time, task, worker_size, load_view,
+                       priority)
 
 
 def drop_from_queue(time: float, task_queue: PriorityQueue,
@@ -250,7 +268,7 @@ def drop_from_queue(time: float, task_queue: PriorityQueue,
         if job.id in already_dropped or job.id in newly_dropped:
             continue
 
-        if should_drop_task(time, qt.task, worker_size, load_view):
+        if should_drop_task(time, qt.task, worker_size, load_view, qt.priority):
             newly_dropped.append(job.id)
             continue
 
@@ -295,7 +313,8 @@ def shadow_drops_from_queue(time: float, task_queue: PriorityQueue,
         if job_id in already_shadow_dropped or job_id in seen_here:
             continue
 
-        if should_shadow_drop_task(time, qt.task, worker_size, load_view):
+        if should_shadow_drop_task(time, qt.task, worker_size, load_view,
+                                   qt.priority):
             seen_here.add(job_id)
             newly_shadow_dropped.append((job_id, qt.task.task_id))
 

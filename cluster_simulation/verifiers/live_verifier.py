@@ -187,11 +187,16 @@ class LiveVerifier(EventListener):
                 worker_size = self.workers[event.kwargs["worker_id"]].total_memory_gb
                 expected_batch_exec_time = mcfg.MODELS[batch.model_data.id]["MIG_BATCH_EXEC_TIMES"][worker_size][batch.size()]
                 actual_batch_exec_time = event.time - self.task_log[(t.job.id, t.task_id)]["exec_start_time"]
-                expected_transfer_time = sum(workflow_cfgs[t1.job.job_type_id]["TASKS"][t1.task_id]["INPUT_SIZE"] 
-                                             for t1 in batch.tasks) / 64000
+                # what the worker adds around the sampled execution time, as
+                # Worker.exec_batch computes it: the inputs in and the results back
+                # out. Subtracting it leaves the execution time itself, which is
+                # what was drawn from the model's configured mean and CV
+                expected_transfer_time = \
+                    SameMachineCPUtoGPU_delay(sum(t1.input_size for t1 in batch.tasks)) + \
+                    SameMachineGPUtoCPU_delay(sum(t1.result_size for t1 in batch.tasks))
 
-                if not self.is_sampled_correctly(actual_batch_exec_time,
-                                                 expected_batch_exec_time + expected_transfer_time,
+                if not self.is_sampled_correctly(actual_batch_exec_time - expected_transfer_time,
+                                                 expected_batch_exec_time,
                                                  mcfg.MODELS[batch.model_data.id]["EXEC_TIME_CVS"][worker_size]):
                     self.sampled_anomalies += 1
                 self.total_samples += 1

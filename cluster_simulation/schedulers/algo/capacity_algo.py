@@ -93,8 +93,9 @@ def get_workflow_stage_capacities(workflows: dict[int, Workflow], workers: dict,
     Returns:
         stage_capacities: Workflow ID -> task ID -> sustainable job rate (qps)
     """
-    # per-stage SLOs cap how large a batch each stage may form, which lowers the
-    # throughput its model can reach
+    # under NEXUS a stage may not form a batch larger than its own SLO budget
+    # affords, which lowers the throughput its model can reach. NEXUS_SPLIT takes
+    # only the stage deadlines from the split and leaves batching uncapped
     max_batch_sizes: dict[int, int] = {}
     if gcfg.SLO_TYPE == "NEXUS":
         for workflow in workflows.values():

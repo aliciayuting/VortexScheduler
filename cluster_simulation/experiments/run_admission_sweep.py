@@ -32,12 +32,12 @@ SWEEP_CONFIGS = {
                           "SLO_TYPE": "JOB_LEVEL",
                           "ADMISSION_CONTROL_POLICY": "NONE"},
     "central_rr_nexus":  {"DROP_POLICY": "EARLY",
-                          "SLO_TYPE": "NEXUS",
+                          "SLO_TYPE": "NEXUS_SPLIT",
                           "ADMISSION_CONTROL_POLICY": "NONE"},
     # no dropping, but with the Nexus per-stage SLO split in place, recording
     # which jobs Nexus would have dropped instead of dropping them
     "central_rr_nexus_shadow": {"DROP_POLICY": "NONE",
-                                "SLO_TYPE": "NEXUS",
+                                "SLO_TYPE": "NEXUS_SPLIT",
                                 "SHADOW_DROP_POLICY": "EARLY",
                                 "ADMISSION_CONTROL_POLICY": "NONE"},
     "central_rr_10prob": {"DROP_POLICY": "NONE",
@@ -53,9 +53,15 @@ SWEEP_CONFIGS = {
                           "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
                           "ADMISSION_BURST_SIZE": 5},
     "central_rr_token_nexus": {"DROP_POLICY": "EARLY",
-                               "SLO_TYPE": "NEXUS",
+                               "SLO_TYPE": "NEXUS_SPLIT",
                                "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
                                "ADMISSION_BURST_SIZE": None},
+
+    # Nexus as published: the same per-stage SLO split as central_rr_nexus, but
+    # with the batch size cap that split implies actually enforced at batching
+    "central_rr_nexus_enforced": {"DROP_POLICY": "EARLY",
+                                  "SLO_TYPE": "NEXUS",
+                                  "ADMISSION_CONTROL_POLICY": "NONE"},
 
     # the queue aware drop policy, which sheds a job once the work already in the
     # cluster means its remaining stages cannot finish in time. Paired against
@@ -76,6 +82,26 @@ SWEEP_CONFIGS = {
                                "ADMISSION_GRANULARITY": "TASK",
                                "ADMISSION_BURST_SIZE": 5},
 
+    # the same token bucket configurations with the workflows sharing one budget
+    # instead of holding one each: the cluster admits the same total rate, but a
+    # bursting tenant may spend the tokens the others left unused. Only differs
+    # from the per-workflow runs above on a multitenant workload
+    "central_rr_token_agg": {"DROP_POLICY": "NONE",
+                             "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
+                             "ADMISSION_BUCKET_SCOPE": "AGGREGATE",
+                             "ADMISSION_BURST_SIZE": None},
+    "central_rr_5token_agg": {"DROP_POLICY": "NONE",
+                              "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
+                              "ADMISSION_BUCKET_SCOPE": "AGGREGATE",
+                              "ADMISSION_BURST_SIZE": 5},
+    # per stage, where an aggregate bucket is held in common by every stage
+    # running on the same model, at that model's whole capacity
+    "central_rr_token_task_agg": {"DROP_POLICY": "NONE",
+                                  "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
+                                  "ADMISSION_GRANULARITY": "TASK",
+                                  "ADMISSION_BUCKET_SCOPE": "AGGREGATE",
+                                  "ADMISSION_BURST_SIZE": None},
+
     # the three token bucket configurations repeated at a higher target
     # utilization, i.e. admitting a larger fraction of estimated capacity
     "central_rr_token_95": {"DROP_POLICY": "NONE",
@@ -87,7 +113,7 @@ SWEEP_CONFIGS = {
                              "ADMISSION_BURST_SIZE": 5,
                              "ADMISSION_TARGET_UTILIZATION": 0.95},
     "central_rr_token_nexus_95": {"DROP_POLICY": "EARLY",
-                                  "SLO_TYPE": "NEXUS",
+                                  "SLO_TYPE": "NEXUS_SPLIT",
                                   "ADMISSION_CONTROL_POLICY": "TOKEN_BUCKET",
                                   "ADMISSION_BURST_SIZE": None,
                                   "ADMISSION_TARGET_UTILIZATION": 0.95},
@@ -136,7 +162,12 @@ def run_one(config_name: str, out_path: str):
         f.write(f"\n\n\"\"\" ----- overrides applied by run_admission_sweep.py "
                 f"({config_name}) ----- \"\"\"\n\n")
         for option, value in overrides.items():
-            f.write(f"{option} = {value!r}\n")
+            # plain strings are written double quoted, like the rest of the
+            # config: tools that read it line by line look for that form, and a
+            # repr'd single-quoted override would be passed over in favour of
+            # the original assignment further up the file
+            literal = f'"{value}"' if isinstance(value, str) else repr(value)
+            f.write(f"{option} = {literal}\n")
 
 
 def run_sweep(config_names: list[str], out_dir: str, max_parallel: int):

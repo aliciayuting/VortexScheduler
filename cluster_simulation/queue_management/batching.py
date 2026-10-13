@@ -105,10 +105,16 @@ class TaskBatcher:
         """Returns largest batch <= task max batch size drawn from [task_queue]
         in FIFO order.
         """
+        # one queue can hold tasks of several stages sharing a model, and under
+        # enforced per-stage SLOs those stages may not share a cap, so the batch is
+        # limited by the tightest cap among the tasks actually in it
         tasks = []
+        max_batch_size = None
         for task in task_queue:
             tasks.append(task)
-            if len(tasks) >= task.model_data.max_batch_size:
+            max_batch_size = min(max_batch_size or task.get_max_batch_size(),
+                                 task.get_max_batch_size())
+            if len(tasks) >= max_batch_size:
                 break
 
         if len(tasks) == 0:
@@ -129,7 +135,7 @@ class TaskBatcher:
         else:
             task_queue = sorted(task_queue, key=lambda t: t.get_task_deadline())
 
-        max_bsize = task_queue[0].model_data.max_batch_size
+        max_bsize = min(task.get_max_batch_size() for task in task_queue)
 
         # if no valid batch possible, return None
         if all((time + task.model_data.batch_exec_times[partition_size][1] > task.get_task_deadline())

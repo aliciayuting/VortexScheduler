@@ -43,21 +43,26 @@ MAX_NUM_MODELS_PER_NODE = 4
 # arrivals more tightly than Poisson does, below 1 spreads them more evenly.
 
 CLIENT_CONFIGS = [
+    # WF13: dairy cow teat health detection
+    {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+                       "PHASES": [{"KIND": "CONSTANT", "RATE": 1, "NUM_JOBS": 10}]},
+          "SLO": 3000}},
+
     # WF6 (textvision)
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 120, "NUM_JOBS": 20000}]},
     #      "SLO": int(62.48 * 5)}},
 
     # Real trace
-    {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
-                     "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
-         "SLO": int(62.48 * 5)}},
-    {10: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
-                      "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
-          "SLO": int(70.48 * 5)}},
-    {11: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
-                      "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/workflow/azuretrace/llm_az_processed_trace.csv"},
-          "SLO": int(80.48 * 5)}},
+    # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
+    #                   "TRACE_FILE_PATH": "workflow/azuretrace/llm_az_processed_trace.csv"},
+    #      "SLO": int(62.48 * 5)}},
+    # {10: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
+    #                    "TRACE_FILE_PATH": "workflow/azuretrace/llm_az_processed_trace.csv"},
+    #       "SLO": int(70.48 * 5)}},
+    # {11: {"WORKLOAD": {"ARRIVAL_PROCESS": "ALITRACE",
+    #                    "TRACE_FILE_PATH": "workflow/azuretrace/llm_az_processed_trace.csv"},
+    #       "SLO": int(80.48 * 5)}},
 
     # WF6 (textvision) with spike
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -82,19 +87,19 @@ CLIENT_CONFIGS = [
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
     #                               "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
-    #                               "STOCHASTIC": True, "DURATION": 40000},
+    #                               "STOCHASTIC": False, "DURATION": 40000},
     #                              {"KIND": "CONSTANT", "RATE": 35, "DURATION": 80000}]},
     #      "SLO": int(62.48 * 5)}},
     # {7: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
     #                               "QUIET_DURATION": 60000, "BURST_DURATION": 10000,
-    #                               "STOCHASTIC": True, "DURATION": 70000},
+    #                               "STOCHASTIC": False, "DURATION": 70000},
     #                              {"KIND": "CONSTANT", "RATE": 35, "DURATION": 50000}]},
     #      "SLO": int(70.48 * 5)}},
     # {8: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
     #                               "QUIET_DURATION": 90000, "BURST_DURATION": 10000,
-    #                               "STOCHASTIC": True, "DURATION": 100000},
+    #                               "STOCHASTIC": False, "DURATION": 100000},
     #                              {"KIND": "CONSTANT", "RATE": 35, "DURATION": 20000}]},
     #      "SLO": int(80.48 * 5)}},
 
@@ -113,19 +118,19 @@ CLIENT_CONFIGS = [
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
     #                               "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
-    #                               "STOCHASTIC": True, "DURATION": 40000},
+    #                               "STOCHASTIC": False, "DURATION": 40000},
     #                              {"KIND": "CONSTANT", "RATE": 35, "DURATION": 80000}]},
     #      "SLO": int(62.48 * 5)}},
     # {10: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                    "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
     #                                "QUIET_DURATION": 60000, "BURST_DURATION": 10000,
-    #                                "STOCHASTIC": True, "DURATION": 70000},
+    #                                "STOCHASTIC": False, "DURATION": 70000},
     #                               {"KIND": "CONSTANT", "RATE": 35, "DURATION": 50000}]},
     #       "SLO": int(70.48 * 5)}},
     # {11: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                    "PHASES": [{"KIND": "BURST", "RATE": 35, "BURST_RATE": 120,
     #                                "QUIET_DURATION": 90000, "BURST_DURATION": 10000,
-    #                                "STOCHASTIC": True, "DURATION": 100000},
+    #                                "STOCHASTIC": False, "DURATION": 100000},
     #                               {"KIND": "CONSTANT", "RATE": 35, "DURATION": 20000}]},
     #       "SLO": int(80.48 * 5)}},
 
@@ -142,15 +147,19 @@ CLIENT_CONFIGS = [
     #                              {"KIND": "CONSTANT", "RATE": 30, "DURATION": 60000}]},
     #      "SLO": int(186.3 * 5)}},
 
-    # WF1/4/5 (multitenant ppl 2)
+    # WF1/4/5 (multitenant ppl 2). The three tenants share model 7, whose 26.79 qps
+    # is the cluster's bottleneck, so these rates hold it at 0.90 of capacity and
+    # every other model below that. The 14/10/12 used before, in the same
+    # proportions, drove it to 1.34x: queues grew without bound and under 1% of
+    # jobs met their SLO
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 14, "NUM_JOBS": 5000}]},
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 9, "NUM_JOBS": 5000}]},
     #      "SLO": int(186.3 * 5)}},
     # {4: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 10, "NUM_JOBS": 5000}]},
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 7, "NUM_JOBS": 5000}]},
     #      "SLO": int(725.2 * 5)}},
     # {5: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 12, "NUM_JOBS": 5000}]},
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 8, "NUM_JOBS": 5000}]},
     #      "SLO": int(326.7 * 5)}},
 
     # WF1/4/5 (multitenant ppl 2) with spike
@@ -221,12 +230,19 @@ ENABLE_NETWORKING_DELAYS = False
 # NOTE: LARGEST_FEASIBLE is not wired up -- see TaskBatcher.get_batch
 BATCH_POLICY = "LARGEST"
 FALLBACK_TO_LARGEST_BATCH = True
-DISABLE_BATCHING = False  # always run batch size 1 when True
+DISABLE_BATCHING = True  # WF13 has parallel same-model tasks from the same job
 
 # NONE | LAZY | EARLY | LOOKAHEAD
 DROP_POLICY = "NONE"
+
+# LOOKAHEAD only: charge a queued task for its model's whole backlog rather than
+# only the tasks ahead of it in queue order
+LOOKAHEAD_WHOLE_QUEUE_DELAY = False
 SLO_SLACK = 0
-SLO_TYPE = "JOB_LEVEL" # JOB_LEVEL | NEXUS
+
+# JOB_LEVEL | NEXUS_SPLIT (batch caps not enforced) | NEXUS
+SLO_TYPE = "JOB_LEVEL"
+EQUALIZE_PARALLEL_STAGE_SLOS = False # NEXUS_SPLIT | NEXUS only
 
 # NONE | LAZY | EARLY | LOOKAHEAD: a drop policy that is evaluated but never enforced.
 # Jobs it would have dropped keep running, and the decision is recorded in the task log
@@ -241,12 +257,16 @@ ADMISSION_DROP_RATE = 0.1  # PROBABILISTIC or ROUND_ROBIN
 # workflow at its bottleneck stage and decides once, on arrival. TASK gives every
 # pipeline stage its own bucket at its own rate and decides at each stage
 ADMISSION_GRANULARITY = "JOB"
+
+# PER_WORKFLOW | AGGREGATE
+ADMISSION_BUCKET_SCOPE = "PER_WORKFLOW"
+
 ADMISSION_TARGET_UTILIZATION = 0.9  # TOKEN_BUCKET: fraction of estimated capacity to admit
 
-# TOKEN_BUCKET: largest burst admitted at once, in jobs. None derives it per
-# workflow from the SLO: the burst the cluster can drain before the jobs at the
-# back of it run out of slack
-ADMISSION_BURST_SIZE = 5
+# TOKEN_BUCKET: largest burst admitted at once, in jobs, per bucket. None derives
+# it per workflow from the SLO: the burst the cluster can drain before the jobs at
+# the back of it run out of slack
+ADMISSION_BURST_SIZE = None
 
 ENABLE_MULTITHREADING = True # allow multiple models on same partition to run at once
 
@@ -256,11 +276,18 @@ AUTOSCALING_POLICY = "NONE"
 # HERD | CUSTOM | INFERLINE
 ALLOCATION_STRATEGY = "CUSTOM"
 
-# WF6/10/11 alloc (textvision variants)
+# WF13 alloc (dairy cow teat health detection)
 CUSTOM_ALLOCATION = [
-    (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
-    (6, [14]), (6, [15]), (6, [16]), (6, [])
+    (24, [20, 21, 24]),
+    (6, [22]), (6, [22]), (6, [22]), (6, [22]),
+    (6, [23]), (6, [23]), (6, [23]), (6, [23]),
 ]
+
+# WF6/10/11 alloc (textvision variants)
+# CUSTOM_ALLOCATION = [
+#     (24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]), (6, [0, 2]),
+#     (6, [14]), (6, [15]), (6, [16]), (6, [])
+# ]
 
 # WF6 alloc (older textvision-only placement; kept as commented fallback)
 # CUSTOM_ALLOCATION = [

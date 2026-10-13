@@ -9,6 +9,10 @@ may be enabled at once.
 Under ADMISSION_GRANULARITY = "JOB" the decision is taken once, at the front door,
 as a job arrives. Under "TASK" it is taken again at every pipeline stage, as each
 task becomes schedulable.
+
+ADMISSION_BUCKET_SCOPE sets whether each workflow is metered against a budget of
+its own or all of them share one, which only differs when the cluster is
+multitenant.
 """
 
 import numpy as np
@@ -46,6 +50,28 @@ ADMISSION_CONTROL_POLICIES = ["NONE", "PROBABILISTIC", "ROUND_ROBIN", "TOKEN_BUC
 #       congested right now sheds, while an uncongested one keeps admitting, and
 #       a non-bottleneck stage is no longer throttled at the bottleneck's rate.
 ADMISSION_GRANULARITIES = ["JOB", "TASK"]
+
+# Who shares an admission budget with whom, i.e. how the buckets are keyed.
+# Applies to TOKEN_BUCKET only, and only matters when several workflows run at
+# once.
+#
+# PER_WORKFLOW: every workflow meters its own work against its own share of the
+#               models it uses. Tenants are isolated: one workflow's burst is
+#               throttled against its own budget and cannot push another
+#               workflow's work out, but an idle tenant's unused share is never
+#               lent to a busy one.
+# AGGREGATE:    the workflows share one budget, sized at the sum of the budgets
+#               they would have held separately. Under JOB granularity that is a
+#               single cluster wide bucket; under TASK it is one bucket per model,
+#               held in common by every stage that runs on it. The cluster admits
+#               the same total rate either way, so the two differ only in who is
+#               allowed to claim it: a bursting tenant may spend tokens the others
+#               would have used, which is cheaper when demand is uneven and
+#               unprotected when one tenant misbehaves.
+ADMISSION_BUCKET_SCOPES = ["PER_WORKFLOW", "AGGREGATE"]
+
+# key of the single bucket under AGGREGATE scope and JOB granularity
+AGGREGATE_BUCKET_KEY = "ALL"
 
 
 class TokenBucket:
@@ -101,15 +127,18 @@ class AdmissionController:
     """Applies the configured admission control policy to arriving work.
 
     Under TOKEN_BUCKET the buckets are sized from the throughput the cluster can
-    sustain (see capacity_algo), and how they are keyed depends on
-    ADMISSION_GRANULARITY:
+    sustain (see capacity_algo). ADMISSION_GRANULARITY sets what a token buys, and
+    hence how finely capacity is estimated:
 
-    JOB  gives each workflow one bucket, rated at its bottleneck stage.
-    TASK gives each pipeline stage its own bucket, rated at that stage's capacity.
+    JOB  rates a workflow at its bottleneck stage and spends a token on arrival.
+    TASK rates each pipeline stage at its own capacity and spends a token of that
+         stage's budget as each task becomes schedulable.
 
-    Either way the buckets are per workflow, which isolates tenants: one
-    workflow's burst is throttled against its own share of the models it uses, and
-    cannot push another workflow's work out.
+    ADMISSION_BUCKET_SCOPE then sets who shares a budget. PER_WORKFLOW gives each
+    workflow (JOB) or each stage of each workflow (TASK) a bucket of its own, so
+    tenants are isolated. AGGREGATE pools those budgets into one bucket for the
+    cluster (JOB) or one per model (TASK), so the admitted total is the same but a
+    bursting tenant may spend what the others left unused.
     """
 
     def __init__(self, workflows: dict[int, Workflow] = None, workers: dict = None,
@@ -124,11 +153,18 @@ class AdmissionController:
             f"Unrecognized admission control policy {gcfg.ADMISSION_CONTROL_POLICY}"
         assert(gcfg.ADMISSION_GRANULARITY in ADMISSION_GRANULARITIES), \
             f"Unrecognized admission granularity {gcfg.ADMISSION_GRANULARITY}"
+        assert(gcfg.ADMISSION_BUCKET_SCOPE in ADMISSION_BUCKET_SCOPES), \
+            f"Unrecognized admission bucket scope {gcfg.ADMISSION_BUCKET_SCOPE}"
         # the other policies shed whole jobs by construction, so silently serving
         # them job-level admission would hide a misconfigured sweep
         assert(gcfg.ADMISSION_GRANULARITY == "JOB"
                or gcfg.ADMISSION_CONTROL_POLICY in ("NONE", "TOKEN_BUCKET")), \
             f"ADMISSION_GRANULARITY = {gcfg.ADMISSION_GRANULARITY} is only " \
+            f"supported for TOKEN_BUCKET, not {gcfg.ADMISSION_CONTROL_POLICY}"
+        # the other policies hold no per workflow state to pool in the first place
+        assert(gcfg.ADMISSION_BUCKET_SCOPE == "PER_WORKFLOW"
+               or gcfg.ADMISSION_CONTROL_POLICY in ("NONE", "TOKEN_BUCKET")), \
+            f"ADMISSION_BUCKET_SCOPE = {gcfg.ADMISSION_BUCKET_SCOPE} is only " \
             f"supported for TOKEN_BUCKET, not {gcfg.ADMISSION_CONTROL_POLICY}"
 
         # arrivals seen since the run began, for round robin rejection
@@ -136,16 +172,24 @@ class AdmissionController:
 
         self.per_task = (gcfg.ADMISSION_CONTROL_POLICY == "TOKEN_BUCKET"
                          and gcfg.ADMISSION_GRANULARITY == "TASK")
+        self.aggregate = (gcfg.ADMISSION_CONTROL_POLICY == "TOKEN_BUCKET"
+                          and gcfg.ADMISSION_BUCKET_SCOPE == "AGGREGATE")
 
-        # bucket key -> [admitted, rejected]. The key is the workflow ID under JOB
-        # granularity and (workflow ID, task ID) under TASK.
+        # Accounting is kept at the finest granularity the run decides on, whatever
+        # the buckets are shared at, so that an aggregate run still shows which
+        # tenant was turned away. The key is the workflow ID under JOB granularity
+        # and (workflow ID, task ID) under TASK.
+        # key -> number of decisions
         self.admitted: dict = {}
         self.rejected: dict = {}
+        # key -> estimated sustainable rate (qps), for logging
+        self.capacities: dict = {}
 
+        # key -> the bucket it draws from, which is the key itself under
+        # PER_WORKFLOW scope and a shared key under AGGREGATE. TOKEN_BUCKET only
+        self.bucket_keys: dict = {}
         # bucket key -> bucket, TOKEN_BUCKET only
         self.buckets: dict = {}
-        # bucket key -> estimated sustainable rate (qps), for logging
-        self.capacities: dict = {}
 
         if gcfg.ADMISSION_CONTROL_POLICY == "TOKEN_BUCKET":
             assert(workflows is not None and workers is not None), \
@@ -165,8 +209,8 @@ class AdmissionController:
 
     def _build_buckets(self, workflows: dict[int, Workflow], workers: dict,
                        start_time: float):
-        """Creates one token bucket per workflow, rated at the throughput the
-        cluster can sustain for it.
+        """Sizes a budget per workflow from the throughput the cluster can sustain
+        for it, then hands them to [_make_buckets] to be kept apart or pooled.
 
         The refill rate is the workflow's share of cluster capacity, scaled by
         ADMISSION_TARGET_UTILIZATION to leave headroom: the capacity estimate
@@ -187,23 +231,23 @@ class AdmissionController:
 
         slos = workload.get_workflow_slos()
 
+        sizes = {}
         for wid, capacity in self.capacities.items():
             rate = capacity * gcfg.ADMISSION_TARGET_UTILIZATION / 1000  # jobs/ms
+            # time a job can afford to spend queued and still finish in time
+            slack = max(0.0, slos[wid] - workflows[wid].get_min_processing_time())
 
-            if gcfg.ADMISSION_BURST_SIZE is not None:
-                depth = gcfg.ADMISSION_BURST_SIZE
-            else:
-                # time a job can afford to spend queued and still finish in time
-                slack = max(0.0, slos[wid] - workflows[wid].get_min_processing_time())
-                depth = rate * slack
+            sizes[wid] = (rate, rate * slack)
+            # all workflows draw on one cluster wide bucket under AGGREGATE
+            self.bucket_keys[wid] = AGGREGATE_BUCKET_KEY if self.aggregate else wid
 
-            # a bucket that can never hold a single token would reject everything
-            self.buckets[wid] = TokenBucket(rate, max(1.0, depth), start_time)
+        self._make_buckets(sizes, start_time)
 
     def _build_task_buckets(self, workflows: dict[int, Workflow], workers: dict,
                             start_time: float):
-        """Creates one token bucket per pipeline stage, rated at the throughput
-        the cluster can sustain for that stage alone.
+        """Sizes a budget per pipeline stage from the throughput the cluster can
+        sustain for that stage alone, then hands them to [_make_buckets] to be kept
+        apart or pooled per model.
 
         Sizing mirrors [_build_buckets], with the workflow's bottleneck rate
         replaced by the stage's own: a stage running on a model the workflow barely
@@ -224,6 +268,7 @@ class AdmissionController:
 
         slos = workload.get_workflow_slos()
 
+        sizes = {}
         for wid, stages in stage_capacities.items():
             workflow = workflows[wid]
             job_slack = max(0.0, slos[wid] - workflow.get_min_processing_time())
@@ -232,13 +277,50 @@ class AdmissionController:
                 key = (wid, task_id)
                 self.capacities[key] = capacity
                 rate = capacity * gcfg.ADMISSION_TARGET_UTILIZATION / 1000  # jobs/ms
+                slack = self._get_stage_slack(workflow, task_id, job_slack)
 
-                if gcfg.ADMISSION_BURST_SIZE is not None:
-                    depth = gcfg.ADMISSION_BURST_SIZE
-                else:
-                    depth = rate * self._get_stage_slack(workflow, task_id, job_slack)
+                sizes[key] = (rate, rate * slack)
+                # a stage's budget is its share of the model it runs on, so under
+                # AGGREGATE the stages sharing that model share one bucket, which
+                # adds those shares back up to the model's whole capacity
+                self.bucket_keys[key] = workflow.tasks[task_id].model_data.id \
+                    if self.aggregate else key
 
-                self.buckets[key] = TokenBucket(rate, max(1.0, depth), start_time)
+        self._make_buckets(sizes, start_time)
+
+    def _make_buckets(self, sizes: dict, start_time: float):
+        """Creates the buckets the keys of [sizes] map to through
+        [self.bucket_keys], summing the rate and depth of every key that shares one.
+
+        Under PER_WORKFLOW scope each key maps to a bucket of its own and the sums
+        are over one term, leaving the budget exactly as [sizes] gives it. Under
+        AGGREGATE several keys land on the same bucket, which therefore refills at
+        the total of the rates they would have held separately: the cluster admits
+        the same long run rate as it would have under PER_WORKFLOW, but whoever
+        asks first gets the tokens.
+
+        A derived depth is pooled the same way, so the shared bucket absorbs the
+        same total burst. An explicit ADMISSION_BURST_SIZE is instead taken as the
+        depth of each bucket as configured, so an aggregate run with it set admits
+        a burst of that many jobs in total rather than that many per tenant.
+
+        Args:
+            sizes: key -> (refill rate in jobs/ms, derived depth in jobs)
+            start_time: Time the buckets start filling (ms)
+        """
+        rates: dict = {}
+        depths: dict = {}
+        for key, (rate, depth) in sizes.items():
+            bucket_key = self.bucket_keys[key]
+            rates[bucket_key] = rates.get(bucket_key, 0) + rate
+            depths[bucket_key] = depths.get(bucket_key, 0) + depth
+
+        for bucket_key, rate in rates.items():
+            depth = gcfg.ADMISSION_BURST_SIZE if gcfg.ADMISSION_BURST_SIZE is not None \
+                else depths[bucket_key]
+
+            # a bucket that can never hold a single token would reject everything
+            self.buckets[bucket_key] = TokenBucket(rate, max(1.0, depth), start_time)
 
     @staticmethod
     def _get_stage_slack(workflow: Workflow, task_id: int, job_slack: float) -> float:
@@ -246,7 +328,7 @@ class AdmissionController:
         deadline of its stage, falling back to [job_slack] when the run has no
         per-stage SLO split to read.
         """
-        if gcfg.SLO_TYPE != "NEXUS" or not workflow.task_slos:
+        if gcfg.SLO_TYPE == "JOB_LEVEL" or not workflow.task_slos:
             return job_slack
 
         task = workflow.tasks[task_id]
@@ -301,11 +383,11 @@ class AdmissionController:
             return False
 
         key = (task.job.job_type_id, task.task_id)
-        assert(key in self.buckets), \
+        assert(key in self.bucket_keys), \
             f"No admission bucket for stage {task.task_id} of workflow " \
             f"{task.job.job_type_id}"
 
-        reject = not self.buckets[key].try_consume(time)
+        reject = not self.buckets[self.bucket_keys[key]].try_consume(time)
         self._count(key, reject)
 
         return reject
@@ -314,14 +396,24 @@ class AdmissionController:
         counter = self.rejected if reject else self.admitted
         counter[key] = counter.get(key, 0) + 1
 
+    def _bucket_label(self, bucket_key) -> str:
+        """Returns a name for the bucket [bucket_key] identifies, for the run's
+        admission_control.csv: rows sharing a label drew on the same bucket.
+        """
+        if self.aggregate:
+            return f"model_{bucket_key}" if self.per_task else "cluster"
+
+        return f"workflow_{bucket_key[0]}_task_{bucket_key[1]}" if self.per_task \
+            else f"workflow_{bucket_key}"
+
     def _should_reject(self, time: float, job: Job) -> bool:
         if gcfg.ADMISSION_CONTROL_POLICY == "NONE":
             return False
 
         if gcfg.ADMISSION_CONTROL_POLICY == "TOKEN_BUCKET":
-            assert(job.job_type_id in self.buckets), \
+            assert(job.job_type_id in self.bucket_keys), \
                 f"No admission bucket for workflow {job.job_type_id}"
-            return not self.buckets[job.job_type_id].try_consume(time)
+            return not self.buckets[self.bucket_keys[job.job_type_id]].try_consume(time)
 
         rate = gcfg.ADMISSION_DROP_RATE
         assert(0 <= rate <= 1), f"ADMISSION_DROP_RATE must be in [0, 1], got {rate}"
@@ -345,12 +437,19 @@ class AdmissionController:
         """Returns what admission control did, for the run's
         admission_control.csv: one row per workflow under JOB granularity, one row
         per pipeline stage under TASK.
+
+        The capacity on a row is the one estimated for that workflow or stage
+        alone, while the rate and burst size are those of the bucket it drew on.
+        Under AGGREGATE scope several rows share a bucket and so repeat its rate
+        and burst size; the [bucket] column says which rows those are.
         """
         stats = []
-        for key in sorted(set(self.admitted) | set(self.rejected) | set(self.buckets)):
+        for key in sorted(set(self.admitted) | set(self.rejected) | set(self.bucket_keys)):
             admitted = self.admitted.get(key, 0)
             rejected = self.rejected.get(key, 0)
-            bucket = self.buckets.get(key)
+
+            bucket_key = self.bucket_keys.get(key)
+            bucket = self.buckets.get(bucket_key)
 
             wid, task_id = key if self.per_task else (key, np.nan)
 
@@ -359,6 +458,8 @@ class AdmissionController:
                 "task_id": task_id,
                 "policy": gcfg.ADMISSION_CONTROL_POLICY,
                 "granularity": gcfg.ADMISSION_GRANULARITY,
+                "bucket_scope": gcfg.ADMISSION_BUCKET_SCOPE,
+                "bucket": self._bucket_label(bucket_key) if bucket else "",
                 "estimated_capacity_qps": self.capacities.get(key, np.nan),
                 "admit_rate_qps": bucket.rate * 1000 if bucket else np.nan,
                 "burst_size_jobs": bucket.depth if bucket else np.nan,
