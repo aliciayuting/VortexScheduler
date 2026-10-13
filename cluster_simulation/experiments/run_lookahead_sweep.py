@@ -44,12 +44,26 @@ EXP_DIR = os.path.join(SIM_DIR, "experiments")
 
 # job size (ms) per workflow: its critical path at batch size 1, which each
 # tenant's job SLO is set as a multiple of
-JOB_SIZES = {1: 186.3, 4: 725.2, 5: 326.7, 6: 62.48, 7: 70.48, 8: 80.48}
+JOB_SIZES = {1: 186.3, 4: 725.2, 5: 326.7,
+             6: 62.48, 7: 70.48, 8: 80.48, 10: 70.48, 11: 80.48}
 
 SLO_MULTIPLES = [3, 4, 5, 6, 7, 8, 9, 10]
 
-# the workflows sharing the cluster in each tenancy
-TENANCIES = {"ppl2": [1, 4, 5], "textvision": [6, 7, 8]}
+# the workflows sharing the cluster in each tenancy. The two textvision tenancies
+# run the same three pipelines with the variant model at opposite ends: in
+# textvision its stage is last, in textvisionswapped first
+TENANCIES = {"ppl2": [1, 4, 5],
+             "textvision": [6, 7, 8],
+             "textvisionswapped": [6, 10, 11]}
+
+# When set, every tenant of a tenancy is given the same job SLO, that of its
+# slowest pipeline, instead of each being given a multiple of its own job size.
+# The tenants then differ only in the work they do and not in what they are
+# promised, so a job's deadline no longer says which tenant it belongs to: EDF and
+# FCFS order the shared queue identically, and LOOKAHEAD weighs every queued job
+# against one common budget. The short pipelines are the ones this loosens, since
+# they keep their own execution time but inherit the slowest tenant's deadline
+EQUALIZE_SLOS = False
 
 ALLOCATIONS = {
     # 12 node multitenant ppl 2, placing models 4-10 and 13
@@ -57,10 +71,13 @@ ALLOCATIONS = {
              (12, [8]), (6, [5]), (6, [13]),
              (24, [9]), (24, [9]), (24, [9]), (24, [9]), (24, [9]),
              (24, [10]), (24, [10]), (24, [10])],
-    # the textvision placement, whose three tails are models 14, 15 and 16
+    # the textvision placement, whose three tails are models 14, 15 and 16. Both
+    # textvision tenancies run on it: swapping which end of the pipeline the
+    # variant model sits at does not change the set of models to place
     "textvision": [(24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]),
                    (6, [0, 2]), (6, [14]), (6, [15]), (6, [16]), (6, [])],
 }
+ALLOCATIONS["textvisionswapped"] = ALLOCATIONS["textvision"]
 
 def _const(rate: int, num_jobs: int) -> dict:
     return {"ARRIVAL_PROCESS": "POISSON",
@@ -82,7 +99,11 @@ def _burst(rate: int, burst_rate: int, quiet: int, burst: int,
 
 # workflow ID -> workload, per tenancy and workload kind
 WORKLOADS = {
-    ("ppl2", "const"): {1: _const(14, 5000), 4: _const(10, 5000), 5: _const(12, 5000)},
+    # rates sized so that no model runs over capacity: the tenants share model 7,
+    # whose 26.79 qps is the cluster's bottleneck, and these put it at 0.90 of it.
+    # They keep the proportions of the 14/10/12 used previously, which drove model
+    # 7 to 1.34x -- unservable, with response times growing without bound
+    ("ppl2", "const"): {1: _const(9, 5000), 4: _const(7, 5000), 5: _const(8, 5000)},
     ("ppl2", "burst"): {1: _burst(7, 24, 160000, 30000, 190000, 450000),
                         4: _burst(7, 24, 320000, 30000, 350000, 290000),
                         5: _burst(7, 24, 480000, 30000, 510000, 130000)},
@@ -91,6 +112,11 @@ WORKLOADS = {
     ("textvision", "burst"): {6: _burst(35, 120, 30000, 10000, 40000, 80000),
                               7: _burst(35, 120, 60000, 10000, 70000, 50000),
                               8: _burst(35, 120, 90000, 10000, 100000, 20000)},
+    ("textvisionswapped", "const"): {6: _const(40, 5000), 10: _const(40, 5000),
+                                     11: _const(40, 5000)},
+    ("textvisionswapped", "burst"): {6: _burst(35, 120, 30000, 10000, 40000, 80000),
+                                     10: _burst(35, 120, 60000, 10000, 70000, 50000),
+                                     11: _burst(35, 120, 90000, 10000, 100000, 20000)},
 }
 
 ORDERINGS = {"fcfs": "FCFS", "edf": "EDF"}
@@ -111,11 +137,28 @@ def _parse(config_name: str) -> tuple[str, str, int, str, str]:
     return tenancy, workload, int(mult[:-1]), ordering, accounting
 
 
+def _job_slos(tenancy: str, workload: str, mult: int) -> dict[int, int]:
+    """Returns the job SLO (ms) each tenant of [tenancy] is given.
+
+    Normally that is [mult] times the tenant's own job size, so every tenant is
+    promised the same headroom over its own critical path. Under EQUALIZE_SLOS it
+    is instead [mult] times the largest job size in the tenancy, so all of them
+    carry the slowest pipeline's deadline.
+    """
+    workflow_ids = list(WORKLOADS[(tenancy, workload)])
+
+    if EQUALIZE_SLOS:
+        slo = int(max(JOB_SIZES[wid] for wid in workflow_ids) * mult)
+        return {wid: slo for wid in workflow_ids}
+
+    return {wid: int(JOB_SIZES[wid] * mult) for wid in workflow_ids}
+
+
 def _overrides(config_name: str) -> dict:
     tenancy, workload, mult, ordering, accounting = _parse(config_name)
+    slos = _job_slos(tenancy, workload, mult)
 
-    return {"CLIENT_CONFIGS": [{wid: {"WORKLOAD": wl,
-                                      "SLO": int(JOB_SIZES[wid] * mult)}}
+    return {"CLIENT_CONFIGS": [{wid: {"WORKLOAD": wl, "SLO": slos[wid]}}
                                for wid, wl in WORKLOADS[(tenancy, workload)].items()],
             "ALLOCATION_STRATEGY": "CUSTOM",
             "CUSTOM_ALLOCATION": ALLOCATIONS[tenancy],
@@ -190,7 +233,8 @@ def run_sweep(config_names: list[str], out_dir: str, max_parallel: int):
             log = open(os.path.join(run_path, "run.log"), "w")
             proc = subprocess.Popen(
                 [sys.executable, "-u", os.path.abspath(__file__),
-                 "--run-one", name, "--out", run_path],
+                 "--run-one", name, "--out", run_path]
+                + (["--equalize-slos"] if EQUALIZE_SLOS else []),
                 cwd=SIM_DIR, env=_child_env(), stdout=log, stderr=subprocess.STDOUT)
             running.append((name, proc, log))
             print(f"[start] {name} -> {run_path}")
@@ -215,10 +259,16 @@ if __name__ == "__main__":
                         help="Number of configurations to run in parallel")
     parser.add_argument("--overwrite", action="store_true",
                         help="Overwrite existing results instead of erroring out")
+    parser.add_argument("--equalize-slos", action="store_true",
+                        help="Give every tenant of a tenancy the same job SLO, "
+                             "that of its slowest pipeline, instead of a multiple "
+                             "of each tenant's own job size")
     parser.add_argument("--run-one", type=str, choices=all_configs,
                         help=argparse.SUPPRESS)  # internal: run a single configuration
 
     args = parser.parse_args()
+
+    EQUALIZE_SLOS = args.equalize_slos
 
     if args.run_one:
         run_one(args.run_one, args.out)
