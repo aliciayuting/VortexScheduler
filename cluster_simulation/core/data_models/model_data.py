@@ -2,7 +2,7 @@ from core.model import Model
 from core.configs.workflow_config import *
 import core.configs.gen_config as gcfg
 
-from scipy.stats import linregress, truncnorm
+from scipy.stats import linregress
 from uuid import uuid4
 from copy import deepcopy
 
@@ -87,8 +87,17 @@ class ModelData:
         return Model(uuid4(), self, time, time + fetch_time)
     
     def get_randomized_exec_time(self, batch_size: int, worker_size: int) -> float:
-        """Returns the execution time of a batch on a worker of a given size
-        sampled from a Normal distribution of CV defined by self.model_data.
+        """Returns the execution time of a batch on a worker of a given size,
+        sampled from a Normal distribution of CV defined by self.model_data and
+        then held within half and one and a half times the configured mean.
+
+        The bounds are applied by clamping rather than by resampling, so a draw
+        outside them is served at the bound it crossed instead of being replaced.
+        A batch therefore never runs faster than half or slower than one and a half
+        times its benchmarked time, whatever the CV: the clamp binds at
+        1 / (2 * CV) standard deviations, which is far into the tail for the models
+        benchmarked at a few percent, but close in for a model whose CV approaches
+        1 -- that model's execution times pile up on the two bounds.
 
         Args:
             batch_size: Size of batch to execute
@@ -100,5 +109,6 @@ class ModelData:
         exact_exec_time = self.batch_exec_times[worker_size][batch_size]
         stddev = self.exec_cvs[worker_size] * exact_exec_time
 
-        a = (0 - exact_exec_time) / stddev
-        return truncnorm.rvs(a, np.inf, loc=exact_exec_time, scale=stddev, size=1)[0]
+        sampled = np.random.normal(exact_exec_time, stddev)
+
+        return min(max(sampled, 0.5 * exact_exec_time), 1.5 * exact_exec_time)

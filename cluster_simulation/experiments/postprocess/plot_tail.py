@@ -1,3 +1,4 @@
+import math
 import os
 import importlib.util
 
@@ -36,9 +37,48 @@ def _find_config_dir(src: str) -> str:
         "its parent")
 
 
+def _get_model_instance_counts(cfg_dir: str) -> dict[int, int]:
+    """Returns how many instances of each model the run placed, read from the
+    allocation in its config snapshot.
+
+    Returns an empty map when the run did not place models from a fixed list, in
+    which case [get_workflow_job_sizes] has nothing to divide a stage's tasks
+    between and charges each of them for one execution.
+
+    Args:
+        cfg_dir: Config snapshot directory for one run
+
+    Returns:
+        instance_counts: Model ID -> number of instances placed
+    """
+    gcfg = _load_config(os.path.join(cfg_dir, "gen_config.py"))
+
+    if getattr(gcfg, "ALLOCATION_STRATEGY", None) != "CUSTOM":
+        return {}
+
+    counts: dict[int, int] = {}
+    for _, model_ids in getattr(gcfg, "CUSTOM_ALLOCATION", []):
+        for model_id in model_ids:
+            counts[model_id] = counts.get(model_id, 0) + 1
+
+    return counts
+
+
 def get_workflow_job_sizes(src: str) -> dict[int, float]:
-    """Returns each workflow's job size, i.e. the minimum time needed to run the
-    pipeline: the critical path through the DAG at batch size 1 with no queueing.
+    """Returns each workflow's job size, i.e. how long one job takes with the
+    cluster to itself: the longest path through the DAG at batch size 1, with each
+    stage charged for the rounds its own job forces it into.
+
+    A stage that a job fans out into more tasks than its model has instances cannot
+    run them all at once, and a batch takes at most one task per job, so those
+    tasks queue behind each other even on an idle cluster. Such a stage is charged
+    ceil(tasks / instances) executions rather than one. Where a job has no more
+    tasks on a model than there are instances -- every stage of the textvision and
+    ppl2 workflows, and most others -- this is exactly the critical path.
+
+    The difference matters for the fan-out workflows: WF12 issues 24 detections per
+    model over four instances, so a job needs six rounds of its 14.7 ms detector
+    and cannot finish in anything like the 15.7 ms its critical path suggests.
 
     Read from the config snapshot in the results directory rather than hardcoded,
     so a plot always reflects the configuration that run actually used.
@@ -52,6 +92,7 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
     cfg_dir = _find_config_dir(src)
     wcfg = _load_config(os.path.join(cfg_dir, "workflow_config.py"))
     mcfg = _load_config(os.path.join(cfg_dir, "model_config.py"))
+    instance_counts = _get_model_instance_counts(cfg_dir)
 
     # batch size 1 is always given directly in the config, so there is no need to
     # rebuild ModelData's regression over the larger batch sizes
@@ -60,6 +101,15 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
     job_sizes = {}
     for cfg in wcfg.WORKFLOW_LIST:
         tasks = {t["TASK_INDEX"]: t for t in cfg["TASKS"]}
+
+        # executions a stage of this job must run back to back, because the job has
+        # more tasks on that model than the allocation gives it instances
+        task_counts: dict[int, int] = {}
+        for task in tasks.values():
+            task_counts[task["MODEL_ID"]] = task_counts.get(task["MODEL_ID"], 0) + 1
+
+        rounds = {model_id: math.ceil(count / max(1, instance_counts.get(model_id, 1)))
+                  for model_id, count in task_counts.items()}
 
         # walk the DAG in topological order accumulating the longest path. A task
         # cannot start until every predecessor is done, hence max over predecessors.
@@ -74,6 +124,7 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
 
                 start = max([finish_by[p] for p in task["PREV_TASK_INDEX"]], default=0)
                 finish_by[tid] = start + (exec_times[task["MODEL_ID"]]
+                                          * rounds[task["MODEL_ID"]]
                                           if task["MODEL_ID"] >= 0 else 0)
 
                 next_ready.extend([

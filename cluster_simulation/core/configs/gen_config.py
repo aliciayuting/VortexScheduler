@@ -4,7 +4,7 @@ import numpy as np
 
 PRODUCE_EVENT_LOG = True
 
-ENABLE_LIVE_VERIFICATION = True
+ENABLE_LIVE_VERIFICATION = False
 
 # Runs a trace of produced event logs to verify simulator actions
 ENABLE_VERIFICATION = False
@@ -47,6 +47,32 @@ CLIENT_CONFIGS = [
     {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
                        "PHASES": [{"KIND": "CONSTANT", "RATE": 1, "NUM_JOBS": 10}]},
           "SLO": 3000}},
+
+    # WF12 (object defect inspection)
+    # {12: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 22, "NUM_JOBS": 10000}]},
+    #       "SLO": int(91 * 8)}},
+
+    # WF12 (object defect inspection) with spikes
+    # {12: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "BURST", "RATE": 16, "BURST_RATE": 40,
+    #                                "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
+    #                                "STOCHASTIC": False, "DURATION": 320000},
+    #                               {"KIND": "CONSTANT", "RATE": 16, "DURATION": 185000}]},
+    #       "SLO": int(91 * 8)}},
+
+    # WF13 (dairy cow teat health detection)
+    # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 18, "NUM_JOBS": 10000}]},
+    #       "SLO": int(56.8 * 8)}},
+
+    # WF13 (dairy cow teat health detection) with spikes
+    # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "BURST", "RATE": 13, "BURST_RATE": 33,
+    #                                "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
+    #                                "STOCHASTIC": False, "DURATION": 360000},
+    #                               {"KIND": "CONSTANT", "RATE": 13, "DURATION": 270000}]},
+    #       "SLO": int(56.8 * 8)}},
 
     # WF6 (textvision)
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -230,7 +256,7 @@ ENABLE_NETWORKING_DELAYS = False
 # NOTE: LARGEST_FEASIBLE is not wired up -- see TaskBatcher.get_batch
 BATCH_POLICY = "LARGEST"
 FALLBACK_TO_LARGEST_BATCH = True
-DISABLE_BATCHING = True  # WF13 has parallel same-model tasks from the same job
+DISABLE_BATCHING = False  # always run batch size 1 when True
 
 # NONE | LAZY | EARLY | LOOKAHEAD
 DROP_POLICY = "NONE"
@@ -279,9 +305,15 @@ ALLOCATION_STRATEGY = "CUSTOM"
 # WF13 alloc (dairy cow teat health detection)
 CUSTOM_ALLOCATION = [
     (24, [20, 21, 24]),
-    (6, [22]), (6, [22]), (6, [22]), (6, [22]),
-    (6, [23]), (6, [23]), (6, [23]), (6, [23]),
+    (12, [22]), (12, [22]), (12, [22]), (12, [22]),
+    (12, [23]), (12, [23]), (12, [23]), (12, [23]),
 ]
+
+# WF12 alloc (object defect inspection)
+# CUSTOM_ALLOCATION = [
+#     (6, [17, 19]), (6, [17]), (6, [17]), (6, [17]),
+#     (6, [18]), (6, [18]), (6, [18]), (6, [18]),
+# ]
 
 # WF6/10/11 alloc (textvision variants)
 # CUSTOM_ALLOCATION = [
