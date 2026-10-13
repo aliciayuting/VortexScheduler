@@ -173,11 +173,7 @@ CLIENT_CONFIGS = [
     #                              {"KIND": "CONSTANT", "RATE": 30, "DURATION": 60000}]},
     #      "SLO": int(186.3 * 5)}},
 
-    # WF1/4/5 (multitenant ppl 2). The three tenants share model 7, whose 26.79 qps
-    # is the cluster's bottleneck, so these rates hold it at 0.90 of capacity and
-    # every other model below that. The 14/10/12 used before, in the same
-    # proportions, drove it to 1.34x: queues grew without bound and under 1% of
-    # jobs met their SLO
+    # WF1/4/5 (multitenant ppl 2)
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 9, "NUM_JOBS": 5000}]},
     #      "SLO": int(186.3 * 5)}},
