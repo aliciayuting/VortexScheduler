@@ -6,6 +6,7 @@ from workers.worker import Worker
 from client.client import Client
 
 from core.data_models.workflow import Workflow
+from core.data_models.model_data import lognormal_params
 from core.batch import Batch
 from core.network import *
 
@@ -222,10 +223,14 @@ class LiveVerifier(EventListener):
 
     def is_sampled_correctly(self, x, mu, cv):
         """Calculate two sided p-value to test probability of being sampled
-        from a given Normal distribution.
+        from the configured exec time distribution with mean mu and CV cv.
         """
-        sigma = cv * mu
-        z = (x - mu) / sigma
+        if gcfg.EXEC_TIME_DISTRIBUTION == "LOGNORMAL":
+            # log of a log-normal sample is Normal
+            log_mu, log_sigma = lognormal_params(mu, cv)
+            z = (np.log(x) - log_mu) / log_sigma
+        else:
+            z = (x - mu) / (cv * mu)
         p = 2 * norm.sf(abs(z))  # two-sided
         return p >= 0.05
     

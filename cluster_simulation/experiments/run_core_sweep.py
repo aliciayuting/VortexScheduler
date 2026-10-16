@@ -207,7 +207,7 @@ def _parse(config_name: str) -> tuple[str, str, str]:
     return family, workload, policy
 
 
-def _overrides(config_name: str) -> dict:
+def _overrides(config_name: str, exec_time_distribution: str) -> dict:
     family, workload, policy = _parse(config_name)
     multiple = SLO_MULTIPLES[family]
 
@@ -223,7 +223,8 @@ def _overrides(config_name: str) -> dict:
                  "DISABLE_BATCHING": False,
                  # only job_log.csv and task_log.csv are read back, and the event
                  # log is by far the largest thing a run writes
-                 "PRODUCE_EVENT_LOG": False}
+                 "PRODUCE_EVENT_LOG": False,
+                 "EXEC_TIME_DISTRIBUTION": exec_time_distribution}
 
     # the policy decides DROP_POLICY, SLO_TYPE and the admission options
     overrides.update(SWEEP_CONFIGS[CORE_POLICIES[policy]])
@@ -239,7 +240,7 @@ def _child_env() -> dict:
     return env
 
 
-def run_one(config_name: str, out_path: str):
+def run_one(config_name: str, out_path: str, exec_time_distribution: str):
     """Runs a single sweep configuration into [out_path]."""
     os.environ.setdefault("SIMULATION_DIR", SIM_DIR)
     for path in (SIM_DIR, EXP_DIR):
@@ -249,7 +250,7 @@ def run_one(config_name: str, out_path: str):
     import core.configs.gen_config as gcfg
     from run_experiment import run_experiment  # seeds the RNG on import
 
-    overrides = _overrides(config_name)
+    overrides = _overrides(config_name, exec_time_distribution)
     for option, value in overrides.items():
         setattr(gcfg, option, value)
 
@@ -271,7 +272,8 @@ def run_one(config_name: str, out_path: str):
             f.write(f"{option} = {literal}\n")
 
 
-def run_sweep(config_names: list[str], out_dir: str, max_parallel: int):
+def run_sweep(config_names: list[str], out_dir: str, max_parallel: int,
+              exec_time_distribution: str):
     """Runs each named configuration in its own process, up to [max_parallel] at once."""
     running: list[tuple[str, subprocess.Popen, object]] = []
     failed: list[str] = []
@@ -300,7 +302,8 @@ def run_sweep(config_names: list[str], out_dir: str, max_parallel: int):
             log = open(os.path.join(run_path, "run.log"), "w")
             proc = subprocess.Popen(
                 [sys.executable, "-u", os.path.abspath(__file__),
-                 "--run-one", name, "--out", run_path],
+                 "--run-one", name, "--out", run_path,
+                 "--exec-time-distribution", exec_time_distribution],
                 cwd=SIM_DIR, env=_child_env(), stdout=log, stderr=subprocess.STDOUT)
             running.append((name, proc, log))
             print(f"[start] {name} -> {run_path}")
@@ -323,6 +326,9 @@ if __name__ == "__main__":
                         help="Subset of configurations to run (default: all)")
     parser.add_argument("-j", "--jobs", type=int, default=4,
                         help="Number of configurations to run in parallel")
+    parser.add_argument("--exec-time-distribution", choices=["NORMAL", "LOGNORMAL"],
+                        default="NORMAL",
+                        help="Distribution batch execution times are sampled from")
     parser.add_argument("--overwrite", action="store_true",
                         help="Overwrite existing results instead of erroring out")
     parser.add_argument("--run-one", type=str, choices=all_configs,
@@ -331,7 +337,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.run_one:
-        run_one(args.run_one, args.out)
+        run_one(args.run_one, args.out, args.exec_time_distribution)
         sys.exit(0)
 
     if not args.name and not args.out:
@@ -347,7 +353,8 @@ if __name__ == "__main__":
                      "Pass --overwrite to replace them or pick another --name.")
 
     os.makedirs(out_dir, exist_ok=True)
-    failed = run_sweep(args.configs, out_dir, max(1, args.jobs))
+    failed = run_sweep(args.configs, out_dir, max(1, args.jobs),
+                       args.exec_time_distribution)
 
     print(f"\nResults in {out_dir}")
     if failed:

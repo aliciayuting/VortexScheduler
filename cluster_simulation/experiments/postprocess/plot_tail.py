@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 import argparse
 
@@ -245,10 +246,48 @@ def _series_colors(groups: list[str] | None, count: int) -> list:
     return colors
 
 
+# dash patterns the --styles keys take, in the order keys are first seen
+_LINESTYLES = ["-", "--", ":", "-."]
+
+
+def _keyed(keys: list[str], values: list, count: int, what: str) -> list:
+    """Maps each series' key to a value, giving keys values in the order the keys
+    are first seen, so that series sharing a key share the value.
+    """
+    assert(len(keys) == count), \
+        f"got {len(keys)} {what} for {count} sources; pass one per source"
+    order = list(dict.fromkeys(keys))
+    assert(len(order) <= len(values)), \
+        f"only {len(values)} {what} are available, got {len(order)} distinct ones"
+    return [values[order.index(k)] for k in keys]
+
+
+def _legend(ax, labels: list[str], colors: list, hues: list[str] | None,
+            styles: list[str] | None, linestyles: list[str]):
+    """Draws the legend. With [hues] or [styles] it lists each colour and each
+    dash pattern once, rather than every series, so a comparison of N policies
+    under M variants takes N + M entries instead of N * M.
+    """
+    if hues is None and styles is None:
+        ax.legend(ncol=2 if len(labels) > 8 else 1, fontsize="small")
+        return
+
+    handles = []
+    for key in dict.fromkeys(hues or labels):
+        i = (hues or labels).index(key)
+        handles.append(Line2D([], [], color=colors[i], linestyle="-", label=key))
+    for key in dict.fromkeys(styles or []):
+        i = styles.index(key)
+        handles.append(Line2D([], [], color="0.3", linestyle=linestyles[i], label=key))
+    ax.legend(handles=handles, fontsize="small")
+
+
 def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: bool,
                                 normalize_by_job_size: bool, save_fig: bool, out_path: str,
                                 max_job_size_multiple: float = 10,
-                                groups: list[str] | None = None):
+                                groups: list[str] | None = None,
+                                hues: list[str] | None = None,
+                                styles: list[str] | None = None):
     """Plots the tail CDF of job response time for every run in [srcs].
 
     The two options are independent and may be combined:
@@ -269,8 +308,18 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
         runs whose SLO exceeds the default still show their tail
         groups: Group name per run, which colours the runs of a group as shades of
         one hue instead of giving each its own (see [_series_colors])
+        hues: Colour key per run. Runs sharing a key share a categorical colour,
+        and the legend lists each key once. Overrides [groups]
+        styles: Dash pattern key per run. Runs sharing a key share a dash pattern,
+        and the legend lists each key once
     """
-    palette = _series_colors(groups, len(srcs))
+    labels = [name for _, name in srcs]
+    if hues is not None:
+        palette = _keyed(hues, list(sns.color_palette("tab10")), len(srcs), "hues")
+    else:
+        palette = _series_colors(groups, len(srcs))
+    linestyles = (_keyed(styles, _LINESTYLES, len(srcs), "styles")
+                  if styles is not None else ["-"] * len(srcs))
     loaded_srcs, max_res = _load_sources(srcs, need_job_sizes=normalize_by_job_size)
 
     if normalize_by_job_size:
@@ -312,10 +361,11 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
                 cdf = _exceedance_counts(subset, _workflow_scale(job_sizes, wf)) / len(subset)
                 cdf[cdf == 0] = np.nan
 
-                wf2ax[wf].plot(thresholds, cdf, label=name, color=palette[i])
+                wf2ax[wf].plot(thresholds, cdf, label=name, color=palette[i],
+                               linestyle=linestyles[i])
 
         for ax in axes:
-            ax.legend(ncol=2 if len(srcs) > 8 else 1, fontsize="small")
+            _legend(ax, labels, palette, hues, styles, linestyles)
             ax.set_xlabel(xlabel)
 
         axes[0].set_ylabel("Tail CDF")
@@ -335,14 +385,15 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
             cdf = counts / len(data)
             cdf[cdf == 0] = np.nan
 
-            plt.plot(thresholds, cdf, label=name, color=palette[i])
+            plt.plot(thresholds, cdf, label=name, color=palette[i],
+                     linestyle=linestyles[i])
 
         plt.xlabel(xlabel)
         plt.ylabel("Tail CDF")
         plt.title("Tail CDF")
         plt.grid(True, which="both")
         plt.yscale("log")
-        plt.legend(ncol=2 if len(srcs) > 8 else 1, fontsize="small")
+        _legend(plt.gca(), labels, palette, hues, styles, linestyles)
         plt.tight_layout()
 
     if save_fig:
@@ -371,6 +422,12 @@ if __name__ == "__main__":
                         help="Group name per source. Sources sharing a group are "
                              "drawn as shades of one hue, light to dark in the "
                              "order given, rather than each taking its own hue")
+    parser.add_argument("--hues", type=str, nargs="+",
+                        help="Colour key per source. Sources sharing a key share a "
+                             "colour and are listed once in the legend")
+    parser.add_argument("--styles", type=str, nargs="+",
+                        help="Dash pattern key per source. Sources sharing a key "
+                             "share a dash pattern and are listed once in the legend")
     parser.add_argument("--normalize", action="store_true",
                         help="Normalize response time to a multiple of job size (the "
                              "workflow's critical path at batch size 1) instead of "
@@ -389,4 +446,4 @@ if __name__ == "__main__":
         out_path = "tail_by_workflow.pdf" if args.split else "tail_agg.pdf"
 
     plot_response_time_tail_cdf(srcs, args.split, args.normalize, args.pdf, out_path,
-                                args.xmax, args.groups)
+                                args.xmax, args.groups, args.hues, args.styles)

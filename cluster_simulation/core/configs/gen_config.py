@@ -26,6 +26,9 @@ VALID_WORKER_SIZES = [24000000, 12000000, 6000000]
 
 MAX_NUM_MODELS_PER_NODE = 4
 
+# NORMAL | LOGNORMAL
+EXEC_TIME_DISTRIBUTION = "NORMAL"
+
 """  --------       Workload Parameters    --------  """
 
 # A workload is a list of PHASES run back to back, plus the ARRIVAL_PROCESS that
