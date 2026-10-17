@@ -5,6 +5,7 @@ from core.data_models.workflow import Workflow
 from core.allocation import ModelAllocation
 
 import uuid
+from collections import Counter
 
 try:
     import gurobipy as gp
@@ -21,8 +22,18 @@ class VortexPlanner:
     def _get_allocation(cls, simulation, node_count: int, workflow: Workflow, slo: float) -> ModelAllocation:
         assert(node_count >= gcfg.MIN_NUM_NODES and node_count <= gcfg.MAX_NUM_NODES)
 
-        models = [m.id for m in workflow.get_models()]
+        # a model with no memory footprint (e.g. an aggregation step) needs no
+        # partition of its own, so it is left out of the placement and co-located
+        # on the first worker instead
+        colocated = sorted(m.id for m in workflow.get_models() if m.size == 0)
+        models = [m.id for m in workflow.get_models() if m.size > 0]
         configs = [sz // 10**6 for sz in gcfg.VALID_WORKER_SIZES]
+
+        # a job issues one task per stage, and a workflow may run several stages on
+        # one model (e.g. fanning a detection out over many crops), so a model's
+        # throughput in jobs is its task throughput divided by its tasks per job
+        tasks_per_job = Counter(t.model_data.id for t in workflow.tasks.values()
+                                if t.model_data)
 
         # choose max bsize s.t. SLO respected if bsize=1 for rem. tasks
         max_batch_sizes = {}
@@ -37,12 +48,14 @@ class VortexPlanner:
                     i for i in range(1, model.max_batch_size+1, 1)
                     if model.batch_exec_times[mem_size][i] < slo - min_proc_without_model)
         
+        # jobs/s one instance sustains on each partition size
         throughput = {
             m.id: {
-                mem_size: int(max_batch_sizes[mem_size][m.id] / \
-                   m.batch_exec_times[mem_size][max_batch_sizes[mem_size][m.id]] * 1000)
+                mem_size: max_batch_sizes[mem_size][m.id] / \
+                   m.batch_exec_times[mem_size][max_batch_sizes[mem_size][m.id]] * 1000 / \
+                   tasks_per_job[m.id]
                    for mem_size in m.batch_exec_times.keys()}
-            for m in workflow.get_models()
+            for m in workflow.get_models() if m.id in models
         }
 
         valid_layouts = [[24], [12, 12], [6, 6, 6, 6], [12, 6, 6]]
@@ -140,9 +153,17 @@ class VortexPlanner:
         # for (model, node, c), count in assignment.items():
         #     print(f" - Model {model} assigned {count}x to {node} with MIG {c}GB")
         
+        # x counts partitions of size c on a node, each hosting one instance, so
+        # every unit of it is a worker of its own
         worker_cfgs = {}
-        for (model, node, c), count in assignment.items():
-            worker_cfgs[uuid.uuid4()] = (c, [model for _ in range(count)])
+        for (model, node, c), count in sorted(assignment.items(), key=lambda kv: -kv[0][2]):
+            for _ in range(count):
+                worker_cfgs[uuid.uuid4()] = (c, [model])
+
+        if colocated:
+            first = next(iter(worker_cfgs))
+            size, mids = worker_cfgs[first]
+            worker_cfgs[first] = (size, mids + colocated)
 
         allocation = ModelAllocation(simulation, worker_cfgs, False)
         for model in workflow.get_models():

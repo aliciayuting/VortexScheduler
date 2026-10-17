@@ -9,6 +9,14 @@ from copy import deepcopy
 import numpy as np
 
 
+def lognormal_params(mean: float, cv: float) -> tuple[float, float]:
+    """Returns the (mu, sigma) of the underlying Normal for a log-normal
+    distribution with the given mean and coefficient of variation.
+    """
+    sigma_sq = np.log(1 + cv**2)
+    return np.log(mean) - sigma_sq / 2, np.sqrt(sigma_sq)
+
+
 class ModelData:
     """
     Uninstantiated model containing model properties/data.
@@ -88,16 +96,20 @@ class ModelData:
     
     def get_randomized_exec_time(self, batch_size: int, worker_size: int) -> float:
         """Returns the execution time of a batch on a worker of a given size,
-        sampled from a Normal distribution of CV defined by self.model_data and
-        then held within half and one and a half times the configured mean.
+        sampled from the distribution set by gcfg.EXEC_TIME_DISTRIBUTION with the
+        configured mean and CV.
 
-        The bounds are applied by clamping rather than by resampling, so a draw
-        outside them is served at the bound it crossed instead of being replaced.
-        A batch therefore never runs faster than half or slower than one and a half
-        times its benchmarked time, whatever the CV: the clamp binds at
-        1 / (2 * CV) standard deviations, which is far into the tail for the models
-        benchmarked at a few percent, but close in for a model whose CV approaches
-        1 -- that model's execution times pile up on the two bounds.
+        LOGNORMAL samples are returned as drawn: the configured mean and CV are
+        those of the log-normal itself, not of the underlying Normal.
+
+        NORMAL samples are held within half and one and a half times the
+        configured mean by resampling: a draw outside those bounds is discarded and
+        redrawn until one falls inside, so the result is a Normal truncated at
+        1 / (2 * CV) standard deviations either side of the mean. The truncation is
+        symmetric, so the mean is still the configured one; the spread comes out
+        slightly below the configured CV, by a negligible amount for the models
+        benchmarked at a few percent and noticeably for a model whose CV
+        approaches 1.
 
         Args:
             batch_size: Size of batch to execute
@@ -107,8 +119,15 @@ class ModelData:
         assert(worker_size in self.batch_exec_times)
 
         exact_exec_time = self.batch_exec_times[worker_size][batch_size]
+
+        if gcfg.EXEC_TIME_DISTRIBUTION == "LOGNORMAL":
+            mu, sigma = lognormal_params(exact_exec_time, self.exec_cvs[worker_size])
+            return np.random.lognormal(mu, sigma)
+
+        assert(gcfg.EXEC_TIME_DISTRIBUTION == "NORMAL")
         stddev = self.exec_cvs[worker_size] * exact_exec_time
 
-        sampled = np.random.normal(exact_exec_time, stddev)
-
-        return min(max(sampled, 0.5 * exact_exec_time), 1.5 * exact_exec_time)
+        while True:
+            sampled = np.random.normal(exact_exec_time, stddev)
+            if 0.5 * exact_exec_time <= sampled <= 1.5 * exact_exec_time:
+                return sampled

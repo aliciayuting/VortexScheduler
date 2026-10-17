@@ -7,7 +7,9 @@ cannot finish in time. Two things vary here:
               the tasks ahead of it in queue order, or the whole backlog
               including the tasks queued behind it (LOOKAHEAD_WHOLE_QUEUE_DELAY,
               the superseded accounting)
-  ordering    the queue order those positions are read from, FCFS or EDF
+  ordering    the queue order those positions are read from: FCFS, EDF, or
+              accumulating priority (AP), which serves the job that has waited
+              longest relative to its job size first
 
 Every run uses job-level SLOs, so a job carries one deadline for the whole
 pipeline and LOOKAHEAD weighs its entire remaining critical path against it. The
@@ -119,7 +121,7 @@ WORKLOADS = {
                                      11: _burst(35, 120, 90000, 10000, 100000, 20000)},
 }
 
-ORDERINGS = {"fcfs": "FCFS", "edf": "EDF"}
+ORDERINGS = {"fcfs": "FCFS", "edf": "EDF", "ap": "ACCUMULATING_PRIORITY"}
 
 # the fixed accounting against the one it replaced
 ACCOUNTINGS = {"ahead": False, "whole": True}

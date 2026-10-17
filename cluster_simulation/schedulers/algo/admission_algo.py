@@ -206,6 +206,8 @@ class AdmissionController:
             f"{gcfg.ADMISSION_TARGET_UTILIZATION}"
         assert(gcfg.ADMISSION_BURST_SIZE is None or gcfg.ADMISSION_BURST_SIZE >= 1), \
             f"ADMISSION_BURST_SIZE must admit at least one job, got {gcfg.ADMISSION_BURST_SIZE}"
+        assert(gcfg.ADMISSION_BURST_SCALE > 0), \
+            f"ADMISSION_BURST_SCALE must be positive, got {gcfg.ADMISSION_BURST_SCALE}"
 
     def _build_buckets(self, workflows: dict[int, Workflow], workers: dict,
                        start_time: float):
@@ -300,9 +302,10 @@ class AdmissionController:
         asks first gets the tokens.
 
         A derived depth is pooled the same way, so the shared bucket absorbs the
-        same total burst. An explicit ADMISSION_BURST_SIZE is instead taken as the
-        depth of each bucket as configured, so an aggregate run with it set admits
-        a burst of that many jobs in total rather than that many per tenant.
+        same total burst, and is then scaled by ADMISSION_BURST_SCALE. An explicit
+        ADMISSION_BURST_SIZE is instead taken as the depth of each bucket as
+        configured, so an aggregate run with it set admits a burst of that many
+        jobs in total rather than that many per tenant.
 
         Args:
             sizes: key -> (refill rate in jobs/ms, derived depth in jobs)
@@ -317,7 +320,7 @@ class AdmissionController:
 
         for bucket_key, rate in rates.items():
             depth = gcfg.ADMISSION_BURST_SIZE if gcfg.ADMISSION_BURST_SIZE is not None \
-                else depths[bucket_key]
+                else depths[bucket_key] * gcfg.ADMISSION_BURST_SCALE
 
             # a bucket that can never hold a single token would reject everything
             self.buckets[bucket_key] = TokenBucket(rate, max(1.0, depth), start_time)

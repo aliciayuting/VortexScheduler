@@ -3,6 +3,7 @@ from queue import PriorityQueue
 import core.configs.gen_config as gcfg
 
 from core.task import Task
+from queue_management.queued_task import refresh_queue
 from schedulers.algo.boost_algo import _get_processing_time, get_min_exec_time
 
 
@@ -254,6 +255,10 @@ def drop_from_queue(time: float, task_queue: PriorityQueue,
         newly_dropped: IDs of jobs dropped by this call, excluding jobs in
         [already_dropped]
     """
+    # a queued task's place in line, which LOOKAHEAD charges it for, is read at
+    # [time] under a time varying ordering
+    refresh_queue(time, task_queue)
+
     if load_view is not None and needs_load_view(gcfg.DROP_POLICY):
         # the loop below empties the queue as it decides, so fix the backlog now
         load_view.prime(time)
@@ -304,6 +309,8 @@ def shadow_drops_from_queue(time: float, task_queue: PriorityQueue,
     """
     if gcfg.SHADOW_DROP_POLICY == "NONE":
         return []
+
+    refresh_queue(time, task_queue)
 
     seen_here: set[int] = set()
     newly_shadow_dropped: list[tuple[int, int]] = []

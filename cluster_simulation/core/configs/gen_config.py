@@ -26,6 +26,9 @@ VALID_WORKER_SIZES = [24000000, 12000000, 6000000]
 
 MAX_NUM_MODELS_PER_NODE = 4
 
+# NORMAL | LOGNORMAL
+EXEC_TIME_DISTRIBUTION = "NORMAL"
+
 """  --------       Workload Parameters    --------  """
 
 # A workload is a list of PHASES run back to back, plus the ARRIVAL_PROCESS that
@@ -51,7 +54,7 @@ CLIENT_CONFIGS = [
     # WF12 (object defect inspection)
     # {12: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 22, "NUM_JOBS": 10000}]},
-    #       "SLO": int(91 * 8)}},
+    #       "SLO": int(91 * 5)}},
 
     # WF12 (object defect inspection) with spikes
     # {12: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -59,20 +62,20 @@ CLIENT_CONFIGS = [
     #                                "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
     #                                "STOCHASTIC": False, "DURATION": 320000},
     #                               {"KIND": "CONSTANT", "RATE": 16, "DURATION": 185000}]},
-    #       "SLO": int(91 * 8)}},
+    #       "SLO": int(91 * 5)}},
 
     # WF13 (dairy cow teat health detection)
     # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 18, "NUM_JOBS": 10000}]},
-    #       "SLO": int(56.8 * 8)}},
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 78, "NUM_JOBS": 20000}]},
+    #       "SLO": int(65.5 * 5)}},
 
     # WF13 (dairy cow teat health detection) with spikes
     # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "BURST", "RATE": 13, "BURST_RATE": 33,
-    #                                "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
-    #                                "STOCHASTIC": False, "DURATION": 360000},
-    #                               {"KIND": "CONSTANT", "RATE": 13, "DURATION": 270000}]},
-    #       "SLO": int(56.8 * 8)}},
+    #                    "PHASES": [{"KIND": "BURST", "RATE": 50, "BURST_RATE": 127,
+    #                                "QUIET_DURATION": 50000, "BURST_DURATION": 10000,
+    #                                "STOCHASTIC": False, "DURATION": 240000},
+    #                               {"KIND": "CONSTANT", "RATE": 50, "DURATION": 100000}]},
+    #       "SLO": int(65.5 * 5)}},
 
     # WF6 (textvision)
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -173,11 +176,7 @@ CLIENT_CONFIGS = [
     #                              {"KIND": "CONSTANT", "RATE": 30, "DURATION": 60000}]},
     #      "SLO": int(186.3 * 5)}},
 
-    # WF1/4/5 (multitenant ppl 2). The three tenants share model 7, whose 26.79 qps
-    # is the cluster's bottleneck, so these rates hold it at 0.90 of capacity and
-    # every other model below that. The 14/10/12 used before, in the same
-    # proportions, drove it to 1.34x: queues grew without bound and under 1% of
-    # jobs met their SLO
+    # WF1/4/5 (multitenant ppl 2)
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 9, "NUM_JOBS": 5000}]},
     #      "SLO": int(186.3 * 5)}},
@@ -230,6 +229,7 @@ ENABLE_PREEMPTION = True
 BOOST_PARAMETER = 0.00293596042
 
 # FCFS | EDF | LAXITY | RELATIVE_LAXITY
+# ACCUMULATING_PRIORITY (largest time since job creation / job size first)
 # JOB_SIZE | REMAINING_EXEC_TIME | REMAINING_TIME_TO_DEADLINE | LAXITY_BOOST | RELATIVE_LAXITY_BOOST
 BOOST_POLICY = "FCFS"
 
@@ -294,6 +294,10 @@ ADMISSION_TARGET_UTILIZATION = 0.9  # TOKEN_BUCKET: fraction of estimated capaci
 # the back of it run out of slack
 ADMISSION_BURST_SIZE = None
 
+# TOKEN_BUCKET: multiplier on the derived burst size, for sweeping it around the
+# derivation. Ignored when ADMISSION_BURST_SIZE is set
+ADMISSION_BURST_SCALE = 1.0
+
 ENABLE_MULTITHREADING = True # allow multiple models on same partition to run at once
 
 # NONE | INFERLINE
@@ -304,9 +308,10 @@ ALLOCATION_STRATEGY = "CUSTOM"
 
 # WF13 alloc (dairy cow teat health detection)
 CUSTOM_ALLOCATION = [
-    (24, [20, 21, 24]),
-    (12, [22]), (12, [22]), (12, [22]), (12, [22]),
-    (12, [23]), (12, [23]), (12, [23]), (12, [23]),
+    (12, [21]), (12, [21]), (12, [21, 24]),
+    (12, [22]), (12, [22]),
+    (12, [23]), (12, [23]), (12, [23]),
+    (6, [20]), (6, [20]), (6, [20]), (6, [20]),
 ]
 
 # WF12 alloc (object defect inspection)
