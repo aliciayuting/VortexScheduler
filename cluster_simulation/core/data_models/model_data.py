@@ -103,13 +103,13 @@ class ModelData:
         those of the log-normal itself, not of the underlying Normal.
 
         NORMAL samples are held within half and one and a half times the
-        configured mean. The bounds are applied by clamping rather than by resampling, so a draw
-        outside them is served at the bound it crossed instead of being replaced.
-        A batch therefore never runs faster than half or slower than one and a half
-        times its benchmarked time, whatever the CV: the clamp binds at
-        1 / (2 * CV) standard deviations, which is far into the tail for the models
-        benchmarked at a few percent, but close in for a model whose CV approaches
-        1 -- that model's execution times pile up on the two bounds.
+        configured mean by resampling: a draw outside those bounds is discarded and
+        redrawn until one falls inside, so the result is a Normal truncated at
+        1 / (2 * CV) standard deviations either side of the mean. The truncation is
+        symmetric, so the mean is still the configured one; the spread comes out
+        slightly below the configured CV, by a negligible amount for the models
+        benchmarked at a few percent and noticeably for a model whose CV
+        approaches 1.
 
         Args:
             batch_size: Size of batch to execute
@@ -127,6 +127,7 @@ class ModelData:
         assert(gcfg.EXEC_TIME_DISTRIBUTION == "NORMAL")
         stddev = self.exec_cvs[worker_size] * exact_exec_time
 
-        sampled = np.random.normal(exact_exec_time, stddev)
-
-        return min(max(sampled, 0.5 * exact_exec_time), 1.5 * exact_exec_time)
+        while True:
+            sampled = np.random.normal(exact_exec_time, stddev)
+            if 0.5 * exact_exec_time <= sampled <= 1.5 * exact_exec_time:
+                return sampled

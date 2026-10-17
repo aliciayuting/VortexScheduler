@@ -200,7 +200,7 @@ class Simulation:
             slo = list(gcfg.CLIENT_CONFIGS[0].values())[0]["SLO"]
             return VortexPlanner.get_allocation(self,
                                                 (gcfg.MIN_NUM_NODES + gcfg.MAX_NUM_NODES) // 2,
-                                                self.workflows[0],
+                                                list(self.workflows.values())[0],
                                                 slo)
 
 

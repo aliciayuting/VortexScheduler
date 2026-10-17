@@ -2,6 +2,7 @@ import core.configs.gen_config as gcfg
 
 from core.task import Task
 from core.batch import Batch
+from queue_management.queued_task import refresh_queue
 
 from queue import PriorityQueue
 
@@ -18,6 +19,8 @@ class TaskBatcher:
             task_queue: Queue from which to form batch
             update_queue: If True, dequeues all elements in batch
         """
+
+        refresh_queue(time, task_queue)
 
         qt_list = []
         while task_queue.qsize() > 0: qt_list.append(task_queue.get())

@@ -81,7 +81,10 @@ class Worker(EventListener):
         self.scheduled_task_to_worker: dict[tuple[int, int], UUID] = {} # (job ID, task ID) -> worker ID
 
         self.awaiting_task_to_deps: dict[Task, list[int]] = {}      # list of dep task IDs remaining
-        self.awaiting_dep_to_task: dict[tuple[int, int], Task] = {} # dep task ID being waited on -> waiting task
+        # dep task ID being waited on -> waiting tasks. Several tasks of one job can
+        # wait on the same dep here when a stage fans out over fewer instances than
+        # it has tasks; the dep's output is sent once per waiting task
+        self.awaiting_dep_to_task: dict[tuple[int, int], list[Task]] = {}
         self.awaiting_batch_to_tasks: dict[UUID, list[Task]] = {}   # instance ID -> assigned batch
         self.awaiting_task_to_batch: dict[Task, UUID] = {}          # waiting task -> assigned instance ID
 
@@ -154,7 +157,7 @@ class Worker(EventListener):
         for task in tasks:
             self.awaiting_task_to_deps[task] = task.required_task_ids.copy()
             for rt in task.required_task_ids:
-                self.awaiting_dep_to_task[(task.job.id, rt)] = task
+                self.awaiting_dep_to_task.setdefault((task.job.id, rt), []).append(task)
             
         if forced_instance_id:
             self.awaiting_batch_to_tasks[forced_instance_id] = tasks
@@ -235,9 +238,12 @@ class Worker(EventListener):
 
             assert((task.job.id, task.task_id) in self.awaiting_dep_to_task)
 
-            waiting_task = self.awaiting_dep_to_task[(task.job.id, task.task_id)]
+            # each copy of the output that arrives satisfies one waiting task
+            waiting = self.awaiting_dep_to_task[(task.job.id, task.task_id)]
+            waiting_task = waiting.pop(0)
+            if not waiting:
+                self.awaiting_dep_to_task.pop((task.job.id, task.task_id))
             self.awaiting_task_to_deps[waiting_task].remove(task.task_id)
-            self.awaiting_dep_to_task.pop((task.job.id, task.task_id))
 
             # if task has no more deps to wait for
             if len(self.awaiting_task_to_deps[waiting_task]) == 0:
@@ -283,7 +289,11 @@ class Worker(EventListener):
                     if t.job.id in job_ids and t not in self.awaiting_task_to_batch]
         for task in stranded:
             for rt in self.awaiting_task_to_deps.pop(task):
-                self.awaiting_dep_to_task.pop((task.job.id, rt), None)
+                waiting = self.awaiting_dep_to_task.get((task.job.id, rt), [])
+                if task in waiting:
+                    waiting.remove(task)
+                if not waiting:
+                    self.awaiting_dep_to_task.pop((task.job.id, rt), None)
 
 
     def _drop_undeliverable_jobs(self, time: float, model_id: int):

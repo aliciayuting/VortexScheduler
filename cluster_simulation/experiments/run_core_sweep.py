@@ -12,12 +12,6 @@ which means one sweep per workload and a config edit in between. Here each of th
 four workloads is carried in the sweep itself and crossed with every policy, so a
 single invocation covers all of them.
 
-Both workflows fan a job out into many tasks on one model -- 24 detections per
-model for WF12, four per classifier for WF13 -- so their send rates sit at about
-0.82 of what their allocations sustain, and their SLOs are set where roughly 85%
-of jobs make the deadline with nothing dropped. That leaves the policies something
-to improve on without the workload being hopeless.
-
 Each configuration runs in its own process so that the RNG seeding in
 run_experiment.py is identical across configurations, i.e. every policy for a
 given workload sees the same arrival trace. Results land in [out]/[config name]/.
@@ -60,11 +54,11 @@ ALLOCATIONS = {
     # each; the 0GB aggregation model rides along on the first worker
     "wf12": [(6, [17, 19]), (6, [17]), (6, [17]), (6, [17]),
              (6, [18]), (6, [18]), (6, [18]), (6, [18])],
-    # WF13: a 12GB worker for each of the four parallel tasks per DINO classifier,
-    # with OCR, segmentation and aggregation sharing the 24GB worker
-    "wf13": [(24, [20, 21, 24]),
-             (12, [22]), (12, [22]), (12, [22]), (12, [22]),
-             (12, [23]), (12, [23]), (12, [23]), (12, [23])],
+    # WF13: the Vortex planner's placement on 5 GPUs
+    "wf13": [(12, [21]), (12, [21]), (12, [21, 24]),
+             (12, [22]), (12, [22]),
+             (12, [23]), (12, [23]), (12, [23]),
+             (6, [20]), (6, [20]), (6, [20]), (6, [20])],
     # the textvision placement with only WF6's tail model placed
     "wf6": [(24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]),
             (6, [0, 2]), (6, [14]), (6, []), (6, []), (6, [])],
@@ -85,11 +79,8 @@ ALLOCATIONS = {
 FAMILIES = {"wf12": [12], "wf13": [13], "wf6": [6], "wf6variants": [6, 7, 8],
             "ppl2": [1], "ppl2mt": [1, 4, 5]}
 
-# Each tenant's job SLO is this many times its own job runtime. WF12 and WF13 are
-# newer and were sized at 8x; the textvision and pipeline 2 workloads carry the 5x
-# the rest of the repo has always used for them, so their runs stay comparable with
-# the results already on disk
-SLO_MULTIPLES = {"wf12": 8, "wf13": 8,
+# Each tenant's job SLO is this many times its own job runtime
+SLO_MULTIPLES = {"wf12": 5, "wf13": 5,
                  "wf6": 5, "wf6variants": 5, "ppl2": 5, "ppl2mt": 5}
 
 
@@ -111,14 +102,13 @@ def _burst(rate: int, burst_rate: int, quiet: int, burst: int,
                        {"KIND": "CONSTANT", "RATE": rate, "DURATION": tail}]}
 
 
-# workflow ID -> workload, per family and workload kind. The WF12 and WF13 bursts
-# spike to 1.5x capacity for 10s out of every 40s and offer the same average rate
-# as their constant workloads; the others are the workloads gen_config.py carries
+# workflow ID -> workload, per family and workload kind
 WORKLOADS = {
     ("wf12", "const"): {12: _const(22, 10000)},
     ("wf12", "burst"): {12: _burst(16, 40, 30000, 10000, 320000, 185000)},
-    ("wf13", "const"): {13: _const(18, 10000)},
-    ("wf13", "burst"): {13: _burst(13, 33, 30000, 10000, 360000, 270000)},
+    # ~20k jobs each: 4 burst cycles (~15.1k jobs) and a 100s tail (~5k)
+    ("wf13", "const"): {13: _const(78, 20000)},
+    ("wf13", "burst"): {13: _burst(50, 127, 50000, 10000, 240000, 100000)},
 
     ("wf6", "const"): {6: _const(120, 20000)},
     ("wf6", "burst"): {6: _burst(100, 175, 15000, 3000, 162000, 17750)},
@@ -226,8 +216,11 @@ def _overrides(config_name: str, exec_time_distribution: str) -> dict:
                  "PRODUCE_EVENT_LOG": False,
                  "EXEC_TIME_DISTRIBUTION": exec_time_distribution}
 
-    # the policy decides DROP_POLICY, SLO_TYPE and the admission options
+    # the policy decides DROP_POLICY, SLO_TYPE and the admission options. Queues
+    # are always FCFS: with one workflow per run every job has the same SLO and
+    # size, so EDF and accumulating priority would order them identically
     overrides.update(SWEEP_CONFIGS[CORE_POLICIES[policy]])
+    overrides["BOOST_POLICY"] = "FCFS"
 
     return overrides
 

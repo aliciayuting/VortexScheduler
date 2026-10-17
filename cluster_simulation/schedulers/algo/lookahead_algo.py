@@ -15,6 +15,7 @@ import bisect
 import core.configs.gen_config as gcfg
 
 from schedulers.algo.capacity_algo import get_instance_throughput
+from queue_management.queued_task import refresh_queue
 
 
 class ClusterLoadView:
@@ -117,6 +118,9 @@ class ClusterLoadView:
         queued: dict[int, list[float]] = {}
         for holder in self._queue_holders:
             for model_id, queue in getattr(holder, "queues", {}).items():
+                # every queue is read at [time], so that priorities from different
+                # queues are comparable under a time varying ordering
+                refresh_queue(time, queue)
                 # read the heap without disturbing it; the sort below puts it in
                 # the order the queue will actually serve
                 queued.setdefault(model_id, []).extend(qt.priority for qt in queue.queue)
