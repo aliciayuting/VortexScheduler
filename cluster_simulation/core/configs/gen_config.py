@@ -53,29 +53,29 @@ CLIENT_CONFIGS = [
 
     # WF12 (object defect inspection)
     # {12: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 22, "NUM_JOBS": 10000}]},
-    #       "SLO": int(91 * 5)}},
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 38, "NUM_JOBS": 20000}]},
+    #       "SLO": int(45.1 * 5)}},
 
     # WF12 (object defect inspection) with spikes
     # {12: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "BURST", "RATE": 16, "BURST_RATE": 40,
-    #                                "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
-    #                                "STOCHASTIC": False, "DURATION": 320000},
-    #                               {"KIND": "CONSTANT", "RATE": 16, "DURATION": 185000}]},
-    #       "SLO": int(91 * 5)}},
+    #                    "PHASES": [{"KIND": "BURST", "RATE": 32, "BURST_RATE": 80,
+    #                                "QUIET_DURATION": 40000, "BURST_DURATION": 10000,
+    #                                "STOCHASTIC": False, "DURATION": 400000},
+    #                               {"KIND": "CONSTANT", "RATE": 32, "DURATION": 105000}]},
+    #       "SLO": int(45.1 * 5)}},
 
     # WF13 (dairy cow teat health detection)
     # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 78, "NUM_JOBS": 20000}]},
-    #       "SLO": int(65.5 * 5)}},
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 122, "NUM_JOBS": 20000}]},
+    #       "SLO": int(56.8 * 5)}},
 
     # WF13 (dairy cow teat health detection) with spikes
     # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                    "PHASES": [{"KIND": "BURST", "RATE": 50, "BURST_RATE": 127,
-    #                                "QUIET_DURATION": 50000, "BURST_DURATION": 10000,
-    #                                "STOCHASTIC": False, "DURATION": 240000},
-    #                               {"KIND": "CONSTANT", "RATE": 50, "DURATION": 100000}]},
-    #       "SLO": int(65.5 * 5)}},
+    #                    "PHASES": [{"KIND": "BURST", "RATE": 80, "BURST_RATE": 200,
+    #                                "QUIET_DURATION": 30000, "BURST_DURATION": 10000,
+    #                                "STOCHASTIC": False, "DURATION": 160000},
+    #                               {"KIND": "CONSTANT", "RATE": 80, "DURATION": 40000}]},
+    #       "SLO": int(56.8 * 5)}},
 
     # WF6 (textvision)
     # {6: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -178,10 +178,10 @@ CLIENT_CONFIGS = [
 
     # WF1/4/5 (multitenant ppl 2)
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 9, "NUM_JOBS": 5000}]},
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 8.75, "NUM_JOBS": 5000}]},
     #      "SLO": int(186.3 * 5)}},
     # {4: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 7, "NUM_JOBS": 5000}]},
+    #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 8.75, "NUM_JOBS": 5000}]},
     #      "SLO": int(725.2 * 5)}},
     # {5: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 8, "NUM_JOBS": 5000}]},
@@ -232,18 +232,6 @@ BOOST_PARAMETER = 0.00293596042
 # ACCUMULATING_PRIORITY (largest time since job creation / job size first)
 # JOB_SIZE | REMAINING_EXEC_TIME | REMAINING_TIME_TO_DEADLINE | LAXITY_BOOST | RELATIVE_LAXITY_BOOST
 BOOST_POLICY = "FCFS"
-
-""" -------         Inferline Parameters  -------- """
-
-ESTIMATOR_CLIENT_CONFIGS = [ # in ms
-    {0: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
-                      "PHASES": [{"KIND": "CONSTANT", "RATE": 55, "NUM_JOBS": 1000},
-                                 {"KIND": "CONSTANT", "RATE": 95, "NUM_JOBS": 1000}]},
-         "SLO": 1014}},
-]
-INFERLINE_TUNING_INTERVAL = 15 * 1000 # ms
-
-ENABLE_ESTIMATOR_LOGGING = False
 
 """  -------        General Scheduling Parameters  --------- """
 
@@ -300,23 +288,22 @@ ADMISSION_BURST_SCALE = 1.0
 
 ENABLE_MULTITHREADING = True # allow multiple models on same partition to run at once
 
-# NONE | INFERLINE
-AUTOSCALING_POLICY = "NONE"
-
-# HERD | CUSTOM | INFERLINE
+# CUSTOM | VORTEX
 ALLOCATION_STRATEGY = "CUSTOM"
 
 # WF13 alloc (dairy cow teat health detection)
 CUSTOM_ALLOCATION = [
-    (12, [21]), (12, [21]), (12, [21, 24]),
-    (12, [22]), (12, [22]),
-    (12, [23]), (12, [23]), (12, [23]),
-    (6, [20]), (6, [20]), (6, [20]), (6, [20]),
+    (12, [21]), (12, [21]), (12, [21]), (12, [21]), (12, [21, 24]),
+    (12, [22]), (12, [22]), (12, [22]), (12, [22]),
+    (12, [23]), (12, [23]), (12, [23]), (12, [23]),
+    (6, [20]), (6, [20]), (6, [20]), (6, [20]), (6, [20]), (6, [20]),
 ]
 
 # WF12 alloc (object defect inspection)
 # CUSTOM_ALLOCATION = [
-#     (6, [17, 19]), (6, [17]), (6, [17]), (6, [17]),
+#     (6, [17]), (6, [17]), (6, [17]), (6, [17]),
+#     (6, [17]), (6, [17]), (6, [17]), (6, [17, 19]),
+#     (6, [18]), (6, [18]), (6, [18]), (6, [18]),
 #     (6, [18]), (6, [18]), (6, [18]), (6, [18]),
 # ]
 

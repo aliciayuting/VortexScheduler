@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 
 # job size (ms) per workflow: its critical path at batch size 1, which the job SLO
 # is a multiple of
-JOB_SIZES = {1: 186.3, 6: 62.48}
+JOB_SIZES = {1: 186.3, 6: 62.48, 12: 45.1, 13: 56.8}
 
 # categorical slots 1 and 2, carrying the comparison itself
 SERIES = [("ahead", "LOOKAHEAD (ahead only)", "#2a78d6"),
@@ -52,10 +52,15 @@ def plot_slo_sweep(src: str, multiples: list[int], out_path: str):
         multiples: Job SLOs to plot, as multiples of job size
         out_path: Where to write the figure
     """
-    panels = [(wid, workload) for wid in sorted(JOB_SIZES)
-              for workload in ("const", "burst")]
+    # one row per workflow the sweep actually ran
+    wids = [wid for wid in sorted(JOB_SIZES)
+            if any(os.path.isdir(os.path.join(src, f"wf{wid}_{workload}_{mult}x_{key}"))
+                   for workload in ("const", "burst") for mult in multiples
+                   for key, _, _ in SERIES)]
+    panels = [(wid, workload) for wid in wids for workload in ("const", "burst")]
 
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8), sharex=True, sharey=True)
+    fig, axes = plt.subplots(len(wids), 2, figsize=(11, 4 * len(wids)),
+                             sharex=True, sharey=True, squeeze=False)
 
     for ax, (wid, workload) in zip(axes.flat, panels):
         for key, label, color in SERIES:
@@ -84,7 +89,7 @@ def plot_slo_sweep(src: str, multiples: list[int], out_path: str):
 
     axes[0][0].set_ylim(0, None)
     axes[0][0].legend(frameon=False, fontsize=9, labelcolor=INK_SECONDARY)
-    for ax in axes[1]:
+    for ax in axes[-1]:
         ax.set_xlabel("Job SLO (multiples of job size)", color=INK_SECONDARY,
                       fontsize=10)
     for ax in axes[:, 0]:

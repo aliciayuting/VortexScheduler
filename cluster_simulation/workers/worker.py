@@ -460,10 +460,14 @@ class Worker(EventListener):
 
         batch_exec_time = batch.model_data.get_randomized_exec_time(
             batch.size(), self.total_memory_gb)
-        task_end_time = time + batch_exec_time + \
-            SameMachineCPUtoGPU_delay(sum(t.input_size for t in batch.tasks)) + \
-            SameMachineGPUtoCPU_delay(sum(t.result_size for t in batch.tasks))
-        
+        task_end_time = time + batch_exec_time
+        # copying the inputs onto the GPU and the results back off is only charged
+        # with networking delays on
+        if gcfg.ENABLE_NETWORKING_DELAYS:
+            task_end_time += \
+                SameMachineCPUtoGPU_delay(sum(t.input_size for t in batch.tasks)) + \
+                SameMachineGPUtoCPU_delay(sum(t.result_size for t in batch.tasks))
+
         reserved_instance_id = None
 
         if batch.model_data != None:

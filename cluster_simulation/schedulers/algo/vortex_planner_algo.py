@@ -3,6 +3,7 @@ import core.configs.gen_config as gcfg
 from core.data_models.model_data import ModelData
 from core.data_models.workflow import Workflow
 from core.allocation import ModelAllocation
+from schedulers.algo.capacity_algo import get_instance_throughput
 
 import uuid
 from collections import Counter
@@ -48,12 +49,12 @@ class VortexPlanner:
                     i for i in range(1, model.max_batch_size+1, 1)
                     if model.batch_exec_times[mem_size][i] < slo - min_proc_without_model)
         
-        # jobs/s one instance sustains on each partition size
+        # jobs/s one instance sustains on each partition size, at whichever batch
+        # size up to the SLO-feasible maximum serves the most tasks per ms
         throughput = {
             m.id: {
-                mem_size: max_batch_sizes[mem_size][m.id] / \
-                   m.batch_exec_times[mem_size][max_batch_sizes[mem_size][m.id]] * 1000 / \
-                   tasks_per_job[m.id]
+                mem_size: get_instance_throughput(m, mem_size, max_batch_sizes[mem_size][m.id]) * \
+                   1000 / tasks_per_job[m.id]
                    for mem_size in m.batch_exec_times.keys()}
             for m in workflow.get_models() if m.id in models
         }

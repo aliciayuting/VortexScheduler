@@ -191,10 +191,12 @@ class LiveVerifier(EventListener):
                 # what the worker adds around the sampled execution time, as
                 # Worker.exec_batch computes it: the inputs in and the results back
                 # out. Subtracting it leaves the execution time itself, which is
-                # what was drawn from the model's configured mean and CV
+                # what was drawn from the model's configured mean and CV. Like the
+                # worker, only charged with networking delays on
                 expected_transfer_time = \
                     SameMachineCPUtoGPU_delay(sum(t1.input_size for t1 in batch.tasks)) + \
-                    SameMachineGPUtoCPU_delay(sum(t1.result_size for t1 in batch.tasks))
+                    SameMachineGPUtoCPU_delay(sum(t1.result_size for t1 in batch.tasks)) \
+                    if gcfg.ENABLE_NETWORKING_DELAYS else 0
 
                 if not self.is_sampled_correctly(actual_batch_exec_time - expected_transfer_time,
                                                  expected_batch_exec_time,

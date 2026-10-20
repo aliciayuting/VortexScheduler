@@ -182,16 +182,6 @@ class Simulation:
                 {uuid4(): cfg for cfg in gcfg.CUSTOM_ALLOCATION},
                 reset_batch_sizes=False)
         
-        elif gcfg.ALLOCATION_STRATEGY == "INFERLINE":
-            # TODO: add support for multitenant
-            assert(len(self.workflows) == 1)
-            assert(len(gcfg.CLIENT_CONFIGS) == 1 and len(gcfg.CLIENT_CONFIGS[0].keys()) == 1)
-
-            slo = list(gcfg.CLIENT_CONFIGS[0].values())[0]["SLO"]
-            alloc = self.inferline.planner_minimize_cost(self, 0, self.workflows[0], slo)
-
-            return alloc
-        
         elif gcfg.ALLOCATION_STRATEGY == "VORTEX":
             # NOTE: no support for multitenant yet
             assert(len(self.workflows) == 1)

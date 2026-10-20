@@ -4,7 +4,6 @@ import argparse
 import shutil
 import numpy as np
 
-# from schedulers.algo.inferline_planner_algo import Inferline
 from simulations.simulation import Simulation
 
 

@@ -77,10 +77,6 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
     tasks on a model than there are instances -- every stage of the textvision and
     ppl2 workflows, and most others -- this is exactly the critical path.
 
-    The difference matters for the fan-out workflows: WF12 issues 24 detections per
-    model over four instances, so a job needs six rounds of its 14.7 ms detector
-    and cannot finish in anything like the 15.7 ms its critical path suggests.
-
     Read from the config snapshot in the results directory rather than hardcoded,
     so a plot always reflects the configuration that run actually used.
 
@@ -103,14 +99,25 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
     for cfg in wcfg.WORKFLOW_LIST:
         tasks = {t["TASK_INDEX"]: t for t in cfg["TASKS"]}
 
-        # executions a stage of this job must run back to back, because the job has
-        # more tasks on that model than the allocation gives it instances
-        task_counts: dict[int, int] = {}
-        for task in tasks.values():
-            task_counts[task["MODEL_ID"]] = task_counts.get(task["MODEL_ID"], 0) + 1
+        # DAG depth of each task; only tasks at the same depth contend for a model,
+        # since a later depth cannot start until the earlier one is done
+        depths: dict[int, int] = {}
 
-        rounds = {model_id: math.ceil(count / max(1, instance_counts.get(model_id, 1)))
-                  for model_id, count in task_counts.items()}
+        def depth(tid: int) -> int:
+            if tid not in depths:
+                depths[tid] = max([depth(p) + 1 for p in tasks[tid]["PREV_TASK_INDEX"]],
+                                  default=0)
+            return depths[tid]
+
+        # executions a stage of this job must run back to back, because the job has
+        # more tasks on that model at that depth than the allocation gives it instances
+        task_counts: dict[tuple[int, int], int] = {}
+        for tid, task in tasks.items():
+            key = (task["MODEL_ID"], depth(tid))
+            task_counts[key] = task_counts.get(key, 0) + 1
+
+        rounds = {key: math.ceil(count / max(1, instance_counts.get(key[0], 1)))
+                  for key, count in task_counts.items()}
 
         # walk the DAG in topological order accumulating the longest path. A task
         # cannot start until every predecessor is done, hence max over predecessors.
@@ -125,7 +132,7 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
 
                 start = max([finish_by[p] for p in task["PREV_TASK_INDEX"]], default=0)
                 finish_by[tid] = start + (exec_times[task["MODEL_ID"]]
-                                          * rounds[task["MODEL_ID"]]
+                                          * rounds[(task["MODEL_ID"], depth(tid))]
                                           if task["MODEL_ID"] >= 0 else 0)
 
                 next_ready.extend([

@@ -2,26 +2,35 @@ import numpy as np
 
 
 def _build_object_defect_tasks():
-    """Build the 3-round/8-camera defect-inspection fan-out and fan-in DAG.
+    """Build the 3-round/8-camera defect-inspection DAG.
 
-    Every captured image is independently sent to both YOLOv5 detectors.  The
-    final task is released only after all 24 * 2 detection results are ready.
-    ROUND and CAMERA_ID are descriptive metadata; the simulator uses the task
-    dependency fields to execute the graph.
+    The rounds run one after another: each round sends its 8 images to both
+    YOLOv5 detectors, and the next round's 16 detections cannot start until all
+    of this round's are done.  The final task is released only after all
+    24 * 2 detection results are ready.  ROUND and CAMERA_ID are descriptive
+    metadata; the simulator uses the task dependency fields to execute the graph.
     """
     image_size_kb = 1000
     detection_result_size_kb = 10
+    tasks_per_round = 8 * 2
+    aggregate_task_index = 3 * tasks_per_round
     detector_tasks = []
 
     for round_id in range(1, 4):
+        round_start = (round_id - 1) * tasks_per_round
+        prev_round = list(range(round_start - tasks_per_round, round_start)) \
+            if round_id > 1 else []
+        next_round = list(range(round_start + tasks_per_round,
+                                round_start + 2 * tasks_per_round)) \
+            if round_id < 3 else []
         for camera_id in range(1, 9):
             for detector, model_id in (("crack", 17), ("hole", 18)):
                 task_index = len(detector_tasks)
                 detector_tasks.append({
                     "MODEL_ID": model_id,
                     "TASK_INDEX": task_index,
-                    "PREV_TASK_INDEX": [],
-                    "NEXT_TASK_INDEX": [48],
+                    "PREV_TASK_INDEX": prev_round,
+                    "NEXT_TASK_INDEX": next_round + [aggregate_task_index],
                     "INPUT_SIZE": image_size_kb,
                     "OUTPUT_SIZE": detection_result_size_kb,
                     "SLO": 0,
@@ -32,8 +41,8 @@ def _build_object_defect_tasks():
 
     detector_tasks.append({
         "MODEL_ID": 19,
-        "TASK_INDEX": 48,
-        "PREV_TASK_INDEX": list(range(48)),
+        "TASK_INDEX": aggregate_task_index,
+        "PREV_TASK_INDEX": list(range(aggregate_task_index)),
         "NEXT_TASK_INDEX": [],
         "INPUT_SIZE": 48 * detection_result_size_kb,
         "OUTPUT_SIZE": detection_result_size_kb,
@@ -540,9 +549,9 @@ WORKFLOW_LIST = [
          "SLO": 0},
         ]
     },
-    {"JOB_TYPE": 12,     # IIT defect-inspection workflow: 3 rounds x 8 cameras x 2 YOLOv5 detectors
+    {"JOB_TYPE": 12,     # IIT defect-inspection workflow: 3 sequential rounds x 8 cameras x 2 YOLOv5 detectors
      "JOB_NAME": "object_defect_inspection",
-     "DESCRIPTION": ("3 rounds x 8 cameras x 2 YOLOv5 detectors; "
+     "DESCRIPTION": ("3 sequential rounds x 8 cameras x 2 YOLOv5 detectors; "
                      "aggregate 48 results from 24 images"),
      "TASKS": _build_object_defect_tasks(),
     },

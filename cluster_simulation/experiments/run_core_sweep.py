@@ -50,14 +50,16 @@ CORE_POLICIES = {
 }
 
 ALLOCATIONS = {
-    # WF12: the two YOLOv5 detectors get equal shares, since a job issues 24 of
-    # each; the 0GB aggregation model rides along on the first worker
-    "wf12": [(6, [17, 19]), (6, [17]), (6, [17]), (6, [17]),
+    # WF12: the Vortex planner's placement on 4 GPUs
+    "wf12": [(6, [17]), (6, [17]), (6, [17]), (6, [17]),
+             (6, [17]), (6, [17]), (6, [17]), (6, [17, 19]),
+             (6, [18]), (6, [18]), (6, [18]), (6, [18]),
              (6, [18]), (6, [18]), (6, [18]), (6, [18])],
-    # WF13: the Vortex planner's placement on 5 GPUs
-    "wf13": [(12, [21]), (12, [21]), (12, [21, 24]),
-             (12, [22]), (12, [22]),
-             (12, [23]), (12, [23]), (12, [23]),
+    # WF13: the Vortex planner's placement on 8 GPUs
+    "wf13": [(12, [21]), (12, [21]), (12, [21]), (12, [21]), (12, [21, 24]),
+             (12, [22]), (12, [22]), (12, [22]), (12, [22]),
+             (12, [23]), (12, [23]), (12, [23]), (12, [23]),
+             (6, [20]), (6, [20]),
              (6, [20]), (6, [20]), (6, [20]), (6, [20])],
     # the textvision placement with only WF6's tail model placed
     "wf6": [(24, [1]), (24, [1]), (24, [1]), (6, [3]), (6, [3]), (6, [3]),
@@ -104,11 +106,10 @@ def _burst(rate: int, burst_rate: int, quiet: int, burst: int,
 
 # workflow ID -> workload, per family and workload kind
 WORKLOADS = {
-    ("wf12", "const"): {12: _const(22, 10000)},
-    ("wf12", "burst"): {12: _burst(16, 40, 30000, 10000, 320000, 185000)},
-    # ~20k jobs each: 4 burst cycles (~15.1k jobs) and a 100s tail (~5k)
-    ("wf13", "const"): {13: _const(78, 20000)},
-    ("wf13", "burst"): {13: _burst(50, 127, 50000, 10000, 240000, 100000)},
+    ("wf12", "const"): {12: _const(38, 20000)},
+    ("wf12", "burst"): {12: _burst(32, 80, 40000, 10000, 400000, 105000)},
+    ("wf13", "const"): {13: _const(122, 20000)},
+    ("wf13", "burst"): {13: _burst(80, 200, 30000, 10000, 160000, 40000)},
 
     ("wf6", "const"): {6: _const(120, 20000)},
     ("wf6", "burst"): {6: _burst(100, 175, 15000, 3000, 162000, 17750)},
@@ -122,7 +123,7 @@ WORKLOADS = {
     ("ppl2", "const"): {1: _const(40, 20000)},
     ("ppl2", "burst"): {1: _burst(30, 80, 30000, 5000, 490000, 60000)},
 
-    ("ppl2mt", "const"): {1: _const(9, 5000), 4: _const(7, 5000), 5: _const(8, 5000)},
+    ("ppl2mt", "const"): {1: _const(8.75, 5000), 4: _const(8.75, 5000), 5: _const(8, 5000)},
     ("ppl2mt", "burst"): {1: _burst(7, 24, 160000, 30000, 190000, 450000),
                           4: _burst(7, 24, 320000, 30000, 350000, 290000),
                           5: _burst(7, 24, 480000, 30000, 510000, 130000)},
@@ -139,12 +140,6 @@ def job_runtime(family: str, workflow_id: int) -> float:
     at most one task per job, so they queue behind each other even on an idle
     cluster. It is what the job SLOs here are a multiple of, and the same quantity
     plot_tail.get_workflow_job_sizes normalizes response times by.
-
-    The critical path alone would be the wrong base: WF12's is 15.7 ms, but a job
-    issues 24 detections per model over four instances, so it needs six rounds of
-    its 14.7 ms detector and cannot finish faster than about 89 ms. Where a job has
-    no more tasks on a model than there are instances, which is every stage of the
-    textvision and pipeline 2 workflows, this is exactly the critical path.
 
     Args:
         family: Key into FAMILIES and ALLOCATIONS
@@ -164,15 +159,28 @@ def job_runtime(family: str, workflow_id: int) -> float:
         for model_id in model_ids:
             instances[model_id] = instances.get(model_id, 0) + 1
 
-    task_counts: dict[int, int] = {}
-    for task in tasks.values():
-        task_counts[task["MODEL_ID"]] = task_counts.get(task["MODEL_ID"], 0) + 1
+    # tasks only contend for a model's instances with tasks at the same DAG depth;
+    # a later depth cannot start until the earlier one is done
+    depths: dict[int, int] = {}
 
-    def exec_time(model_id: int) -> float:
+    def depth(task_id: int) -> int:
+        if task_id not in depths:
+            depths[task_id] = max([depth(p) + 1 for p in tasks[task_id]["PREV_TASK_INDEX"]],
+                                  default=0)
+        return depths[task_id]
+
+    task_counts: dict[tuple[int, int], int] = {}
+    for task_id, task in tasks.items():
+        key = (task["MODEL_ID"], depth(task_id))
+        task_counts[key] = task_counts.get(key, 0) + 1
+
+    def exec_time(task_id: int) -> float:
+        model_id = tasks[task_id]["MODEL_ID"]
         if model_id < 0:
             return 0.0
         times = mcfg.MODELS[model_id]["MIG_BATCH_EXEC_TIMES"]
-        rounds = math.ceil(task_counts[model_id] / max(1, instances.get(model_id, 1)))
+        rounds = math.ceil(task_counts[(model_id, depth(task_id))]
+                           / max(1, instances.get(model_id, 1)))
         return times[max(times)][1] * rounds
 
     finish: dict[int, float] = {}
@@ -181,7 +189,7 @@ def job_runtime(family: str, workflow_id: int) -> float:
         if task_id not in finish:
             task = tasks[task_id]
             start = max([finish_by(p) for p in task["PREV_TASK_INDEX"]], default=0)
-            finish[task_id] = start + exec_time(task["MODEL_ID"])
+            finish[task_id] = start + exec_time(task_id)
         return finish[task_id]
 
     return max(finish_by(task_id) for task_id in tasks)
