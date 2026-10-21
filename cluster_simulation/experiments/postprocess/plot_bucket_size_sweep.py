@@ -81,10 +81,13 @@ def plot_summary(summary: pd.DataFrame, out_path: str):
     """SLO attainment (top) and share of jobs rejected at admission (bottom)
     against bucket size, one column per workflow.
     """
-    fig, axes = plt.subplots(2, len(FAMILIES), figsize=(16, 7.5), sharex=True,
-                             sharey="row")
+    # only the workflows this sweep directory actually ran
+    families = [(f, n) for f, n in FAMILIES if (summary["family"] == f).any()]
 
-    for col, (family, name) in enumerate(FAMILIES):
+    fig, axes = plt.subplots(2, len(families), figsize=(4 * len(families), 7.5),
+                             sharex=True, sharey="row", squeeze=False)
+
+    for col, (family, name) in enumerate(families):
         rows = summary[summary["family"] == family]
         derived = rows.loc[rows["scale"] == 1.0, "burst_size_jobs"]
         title = f"{name}\nderived bucket: {derived.iloc[0]:.1f} jobs" if len(derived) else name
@@ -117,7 +120,7 @@ def plot_summary(summary: pd.DataFrame, out_path: str):
 
     axes[1][0].set_ylim(0, None)
     axes[0][0].legend(frameon=False, fontsize=9, labelcolor=INK_SECONDARY,
-                      loc="lower right")
+                      loc="best")
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=200, facecolor=SURFACE)

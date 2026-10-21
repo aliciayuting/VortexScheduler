@@ -101,11 +101,10 @@ def _burst(rate: int, burst_rate: int, quiet: int, burst: int,
 
 # workflow ID -> workload, per tenancy and workload kind
 WORKLOADS = {
-    # rates sized so that no model runs over capacity: the tenants share model 7,
-    # whose 26.79 qps is the cluster's bottleneck, and these put it at 0.90 of it.
-    # They keep the proportions of the 14/10/12 used previously, which drove model
-    # 7 to 1.34x -- unservable, with response times growing without bound
-    ("ppl2", "const"): {1: _const(9, 5000), 4: _const(7, 5000), 5: _const(8, 5000)},
+    # matches the core sweep's ppl2mt const: the tenants share model 7, whose
+    # 26.79 qps is the cluster's bottleneck, and these put it at about 0.95 of it,
+    # with WF4's own model 9 at about 0.96
+    ("ppl2", "const"): {1: _const(8.75, 5000), 4: _const(8.75, 5000), 5: _const(8, 5000)},
     ("ppl2", "burst"): {1: _burst(7, 24, 160000, 30000, 190000, 450000),
                         4: _burst(7, 24, 320000, 30000, 350000, 290000),
                         5: _burst(7, 24, 480000, 30000, 510000, 130000)},

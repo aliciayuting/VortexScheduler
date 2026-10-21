@@ -3,6 +3,8 @@
 The policies are the subset of run_admission_sweep.py's table that the comparison
 usually turns on: nothing shedding work, the two SLO-aware drop policies, the queue
 aware one, and token bucket admission on its own and alongside the Nexus split.
+Alongside them runs a flat rate baseline, round robin admission rejecting the
+share of jobs the best of those policies left unserved on the same workload.
 Taking them from that table rather than restating them keeps the two sweeps from
 drifting apart.
 
@@ -47,7 +49,14 @@ CORE_POLICIES = {
     "token": "central_rr_token",
     "5token": "central_rr_5token",
     "tokennexus": "central_rr_token_nexus",
+    # round robin admission at a flat drop rate, set per workload (see
+    # flat_drop_rate) rather than taken from the table's fixed 10%
+    "rrdrop": "central_rr_10rr",
 }
+
+# the policy whose drop rate is derived from the other policies' results, so it
+# runs only once they have finished
+FLAT_DROP_POLICY = "rrdrop"
 
 ALLOCATIONS = {
     # WF12: the Vortex planner's placement on 4 GPUs
@@ -205,7 +214,43 @@ def _parse(config_name: str) -> tuple[str, str, str]:
     return family, workload, policy
 
 
-def _overrides(config_name: str, exec_time_distribution: str) -> dict:
+def flat_drop_rate(out_dir: str, family: str, workload: str) -> float:
+    """Returns the share of jobs FLAT_DROP_POLICY rejects for [family] under
+    [workload]: whatever the best of the other policies left unserved, i.e.
+    1 - the highest SLO attainment any of them reached on this workload.
+
+    Args:
+        out_dir: Sweep results directory, holding the other policies' runs
+        family: Key into FAMILIES
+        workload: const or burst
+
+    Returns:
+        drop_rate: Share of arriving jobs to reject, in [0, 1]
+    """
+    import pandas as pd
+
+    attainments = {}
+    for policy in CORE_POLICIES:
+        if policy == FLAT_DROP_POLICY:
+            continue
+        job_log = os.path.join(out_dir, f"{family}_{workload}_{policy}", "sim_logs",
+                               "job_log.csv")
+        assert(os.path.exists(job_log)), \
+            f"{FLAT_DROP_POLICY} needs every other policy's results first, " \
+            f"missing {job_log}"
+
+        # every job of every workflow in the family, dropped and rejected ones
+        # counting as misses
+        jobs = pd.read_csv(job_log)
+        met = jobs["was_completed"].astype(bool) \
+            & (jobs["response_time"] <= jobs["deadline"] - jobs["create_time"])
+        attainments[policy] = met.mean()
+
+    return 1 - max(attainments.values())
+
+
+def _overrides(config_name: str, exec_time_distribution: str,
+               out_dir: str | None = None) -> dict:
     family, workload, policy = _parse(config_name)
     multiple = SLO_MULTIPLES[family]
 
@@ -230,6 +275,11 @@ def _overrides(config_name: str, exec_time_distribution: str) -> dict:
     overrides.update(SWEEP_CONFIGS[CORE_POLICIES[policy]])
     overrides["BOOST_POLICY"] = "FCFS"
 
+    if policy == FLAT_DROP_POLICY:
+        assert(out_dir is not None), \
+            f"{FLAT_DROP_POLICY} needs the sweep directory to derive its drop rate"
+        overrides["ADMISSION_DROP_RATE"] = flat_drop_rate(out_dir, family, workload)
+
     return overrides
 
 
@@ -251,7 +301,8 @@ def run_one(config_name: str, out_path: str, exec_time_distribution: str):
     import core.configs.gen_config as gcfg
     from run_experiment import run_experiment  # seeds the RNG on import
 
-    overrides = _overrides(config_name, exec_time_distribution)
+    overrides = _overrides(config_name, exec_time_distribution,
+                           os.path.dirname(os.path.abspath(out_path)))
     for option, value in overrides.items():
         setattr(gcfg, option, value)
 
@@ -275,7 +326,19 @@ def run_one(config_name: str, out_path: str, exec_time_distribution: str):
 
 def run_sweep(config_names: list[str], out_dir: str, max_parallel: int,
               exec_time_distribution: str):
-    """Runs each named configuration in its own process, up to [max_parallel] at once."""
+    """Runs each named configuration in its own process, up to [max_parallel] at
+    once. FLAT_DROP_POLICY runs go last, since their drop rate is read off the
+    others' results.
+    """
+    flat = [name for name in config_names if _parse(name)[2] == FLAT_DROP_POLICY]
+    rest = [name for name in config_names if name not in flat]
+
+    return _run_all(rest, out_dir, max_parallel, exec_time_distribution) \
+        + _run_all(flat, out_dir, max_parallel, exec_time_distribution)
+
+
+def _run_all(config_names: list[str], out_dir: str, max_parallel: int,
+             exec_time_distribution: str) -> list[str]:
     running: list[tuple[str, subprocess.Popen, object]] = []
     failed: list[str] = []
     pending = list(config_names)

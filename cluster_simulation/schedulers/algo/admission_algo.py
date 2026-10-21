@@ -30,7 +30,9 @@ from schedulers.algo.capacity_algo import (get_workflow_capacities,
 # NONE:          admit every job
 # PROBABILISTIC: reject each arriving job independently with probability
 #                ADMISSION_DROP_RATE
-# ROUND_ROBIN:   reject one job out of every round(1 / ADMISSION_DROP_RATE)
+# ROUND_ROBIN:   reject arriving jobs at the flat rate ADMISSION_DROP_RATE, spread
+#                evenly over the arrivals (one out of every 1 / ADMISSION_DROP_RATE
+#                on average, even when that is not a whole number)
 # TOKEN_BUCKET:  admit up to the rate the cluster can actually serve, allowing
 #                bursts of the size it can still drain within the SLO
 ADMISSION_CONTROL_POLICIES = ["NONE", "PROBABILISTIC", "ROUND_ROBIN", "TOKEN_BUCKET"]
@@ -429,9 +431,12 @@ class AdmissionController:
         if gcfg.ADMISSION_CONTROL_POLICY == "PROBABILISTIC":
             return np.random.random() < rate
         elif gcfg.ADMISSION_CONTROL_POLICY == "ROUND_ROBIN":
-            # reject exactly one job out of every [period] arrivals
-            period = max(1, round(1 / rate))
-            return self.arrival_count % period == 0
+            # reject whenever the rejections owed so far, arrival_count * rate,
+            # pass another whole job, so that after n arrivals exactly
+            # floor(n * rate) have been rejected. A rate of 1 / k rejects every
+            # k-th job; the epsilon keeps float error from delaying a whole one
+            owed = lambda n: int(n * rate + 1e-9)
+            return owed(self.arrival_count) > owed(self.arrival_count - 1)
 
         raise ValueError("Unrecognized admission control policy "
                          f"{gcfg.ADMISSION_CONTROL_POLICY}")
