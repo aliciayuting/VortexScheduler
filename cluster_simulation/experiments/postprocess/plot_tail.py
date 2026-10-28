@@ -38,37 +38,41 @@ def _find_config_dir(src: str) -> str:
         "its parent")
 
 
-def _get_model_instance_counts(cfg_dir: str) -> dict[int, int]:
-    """Returns how many instances of each model the run placed, read from the
-    allocation in its config snapshot.
+def _get_model_placements(cfg_dir: str) -> tuple[dict[int, int], dict[int, set[int]]]:
+    """Returns how many instances of each model the run placed, and on which
+    partition sizes, read from the allocation in its config snapshot.
 
-    Returns an empty map when the run did not place models from a fixed list, in
+    Returns empty maps when the run did not place models from a fixed list, in
     which case [get_workflow_job_sizes] has nothing to divide a stage's tasks
-    between and charges each of them for one execution.
+    between and charges each of them for one execution on the largest partition.
 
     Args:
         cfg_dir: Config snapshot directory for one run
 
     Returns:
         instance_counts: Model ID -> number of instances placed
+        partition_sizes: Model ID -> partition sizes (GB) its instances run on
     """
     gcfg = _load_config(os.path.join(cfg_dir, "gen_config.py"))
 
     if getattr(gcfg, "ALLOCATION_STRATEGY", None) != "CUSTOM":
-        return {}
+        return {}, {}
 
     counts: dict[int, int] = {}
-    for _, model_ids in getattr(gcfg, "CUSTOM_ALLOCATION", []):
+    sizes: dict[int, set[int]] = {}
+    for partition_size, model_ids in getattr(gcfg, "CUSTOM_ALLOCATION", []):
         for model_id in model_ids:
             counts[model_id] = counts.get(model_id, 0) + 1
+            sizes.setdefault(model_id, set()).add(partition_size)
 
-    return counts
+    return counts, sizes
 
 
 def get_workflow_job_sizes(src: str) -> dict[int, float]:
     """Returns each workflow's job size, i.e. how long one job takes with the
     cluster to itself: the longest path through the DAG at batch size 1, with each
-    stage charged for the rounds its own job forces it into.
+    stage charged for the rounds its own job forces it into and run at the speed of
+    the partition size the allocation places its model on.
 
     A stage that a job fans out into more tasks than its model has instances cannot
     run them all at once, and a batch takes at most one task per job, so those
@@ -89,11 +93,17 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
     cfg_dir = _find_config_dir(src)
     wcfg = _load_config(os.path.join(cfg_dir, "workflow_config.py"))
     mcfg = _load_config(os.path.join(cfg_dir, "model_config.py"))
-    instance_counts = _get_model_instance_counts(cfg_dir)
+    instance_counts, partition_sizes = _get_model_placements(cfg_dir)
 
     # batch size 1 is always given directly in the config, so there is no need to
-    # rebuild ModelData's regression over the larger batch sizes
-    exec_times = {i: m["MIG_BATCH_EXEC_TIMES"][24][1] for i, m in enumerate(mcfg.MODELS)}
+    # rebuild ModelData's regression over the larger batch sizes. A model placed on
+    # several partition sizes is charged for its slowest, and an unplaced one for
+    # its largest partition
+    exec_times = {}
+    for i, m in enumerate(mcfg.MODELS):
+        times = m["MIG_BATCH_EXEC_TIMES"]
+        exec_times[i] = max(times[size][1]
+                            for size in partition_sizes.get(i, {max(times)}))
 
     job_sizes = {}
     for cfg in wcfg.WORKFLOW_LIST:

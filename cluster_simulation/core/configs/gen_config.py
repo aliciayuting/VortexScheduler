@@ -166,7 +166,7 @@ CLIENT_CONFIGS = [
     # WF1 (ppl2)
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 40, "NUM_JOBS": 20000}]},
-    #      "SLO": int(186.3 * 5)}},
+    #      "SLO": int(256.3 * 5)}},
 
     # WF1 (ppl2) with repeated spikes
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -174,18 +174,18 @@ CLIENT_CONFIGS = [
     #                               "QUIET_DURATION": 30000, "BURST_DURATION": 5000,
     #                               "STOCHASTIC": False, "DURATION": 490000},
     #                              {"KIND": "CONSTANT", "RATE": 30, "DURATION": 60000}]},
-    #      "SLO": int(186.3 * 5)}},
+    #      "SLO": int(256.3 * 5)}},
 
     # WF1/4/5 (multitenant ppl 2)
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 8.75, "NUM_JOBS": 5000}]},
-    #      "SLO": int(186.3 * 5)}},
+    #      "SLO": int(256.1 * 5)}},
     # {4: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 8.75, "NUM_JOBS": 5000}]},
-    #      "SLO": int(725.2 * 5)}},
+    #      "SLO": int(787.0 * 5)}},
     # {5: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "CONSTANT", "RATE": 8, "NUM_JOBS": 5000}]},
-    #      "SLO": int(326.7 * 5)}},
+    #      "SLO": int(388.7 * 5)}},
 
     # WF1/4/5 (multitenant ppl 2) with spike
     # {1: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
@@ -193,19 +193,19 @@ CLIENT_CONFIGS = [
     #                               "QUIET_DURATION": 160000, "BURST_DURATION": 30000,
     #                               "STOCHASTIC": False, "DURATION": 190000},
     #                              {"KIND": "CONSTANT", "RATE": 7, "DURATION": 450000}]},
-    #      "SLO": int(186.3 * 5)}},
+    #      "SLO": int(256.1 * 5)}},
     # {4: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "BURST", "RATE": 7, "BURST_RATE": 24,
     #                               "QUIET_DURATION": 320000, "BURST_DURATION": 30000,
     #                               "STOCHASTIC": False, "DURATION": 350000},
     #                              {"KIND": "CONSTANT", "RATE": 7, "DURATION": 290000}]},
-    #      "SLO": int(725.2 * 5)}},
+    #      "SLO": int(787.0 * 5)}},
     # {5: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                   "PHASES": [{"KIND": "BURST", "RATE": 7, "BURST_RATE": 24,
     #                               "QUIET_DURATION": 480000, "BURST_DURATION": 30000,
     #                               "STOCHASTIC": False, "DURATION": 510000},
     #                              {"KIND": "CONSTANT", "RATE": 7, "DURATION": 130000}]},
-    #      "SLO": int(326.7 * 5)}},
+    #      "SLO": int(388.7 * 5)}},
 ]
 
 DEFAULT_ARRIVAL_PROCESS = "POISSON"  # CONSTANT | POISSON | GAMMA

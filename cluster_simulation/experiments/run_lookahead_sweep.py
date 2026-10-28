@@ -46,7 +46,7 @@ EXP_DIR = os.path.join(SIM_DIR, "experiments")
 
 # job size (ms) per workflow: its critical path at batch size 1, which each
 # tenant's job SLO is set as a multiple of
-JOB_SIZES = {1: 186.3, 4: 725.2, 5: 326.7,
+JOB_SIZES = {1: 256.1, 4: 787.0, 5: 388.7,
              6: 62.48, 7: 70.48, 8: 80.48, 10: 70.48, 11: 80.48}
 
 SLO_MULTIPLES = [3, 4, 5, 6, 7, 8, 9, 10]

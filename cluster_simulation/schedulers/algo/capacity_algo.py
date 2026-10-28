@@ -2,10 +2,13 @@
 model allocation, in jobs per second per workflow.
 """
 
+import math
+
 import core.configs.gen_config as gcfg
 
 from core.data_models.model_data import ModelData
 from core.data_models.workflow import Workflow
+from schedulers.algo.nexus_algo import NexusSLOSplitter
 
 
 def get_instance_throughput(model_data: ModelData, worker_size_gb: int,
@@ -162,3 +165,80 @@ def get_workflow_capacities(workflows: dict[int, Workflow], workers: dict,
         workflows, workers, demand_rates, time)
 
     return {wid: min(stages.values()) for wid, stages in stage_capacities.items()}
+
+
+def get_task_exec_times(workflow: Workflow, workers: dict,
+                        time: float = 0) -> dict[int, float]:
+    """Returns how long each task of [workflow] takes to run on its own, at batch
+    size 1 on the slowest partition size its model is placed on, the same
+    partition the Nexus split plans each stage against.
+
+    Args:
+        workflow: Workflow whose tasks to time
+        workers: Map of worker ID -> worker object
+        time: Time at which to read model placements
+
+    Returns:
+        exec_times: Task ID -> exec time (ms)
+    """
+    worker_sizes = NexusSLOSplitter.get_task_worker_sizes(workflow, workers, time)
+
+    return {task_id: workflow.tasks[task_id].model_data.batch_exec_times[size][1]
+            for task_id, size in worker_sizes.items()}
+
+
+def get_job_runtime(workflow: Workflow, workers: dict, time: float = 0) -> float:
+    """Returns how long one job of [workflow] takes with the cluster to itself on
+    the current allocation, i.e. the job size its SLO is set as a multiple of.
+
+    This is the longest path through the DAG with each task charged its
+    [get_task_exec_times] time, times the rounds its own job forces its stage
+    into: a stage fanned out into more tasks than its model has instances cannot
+    run them at once, and a batch takes at most one task per job, so they queue
+    behind each other even on an idle cluster. Tasks only contend for a model's
+    instances with tasks at the same DAG depth. Mirrors job_runtime in
+    experiments/run_core_sweep.py, which computes the same quantity from the
+    config alone.
+
+    Args:
+        workflow: Workflow to size
+        workers: Map of worker ID -> worker object
+        time: Time at which to read model placements
+
+    Returns:
+        runtime: Time one job needs on an idle cluster (ms)
+    """
+    exec_times = get_task_exec_times(workflow, workers, time)
+
+    instances: dict[int, int] = {}
+    for worker in workers.values():
+        for state in worker.GPU_state.state_at(time):
+            model_id = state.model.data.id
+            instances[model_id] = instances.get(model_id, 0) + 1
+
+    depths: dict[int, int] = {}
+
+    def depth(task_id: int) -> int:
+        if task_id not in depths:
+            depths[task_id] = max([depth(t.id) + 1
+                                   for t in workflow.tasks[task_id].prev_tasks],
+                                  default=0)
+        return depths[task_id]
+
+    task_counts: dict[tuple[int, int], int] = {}
+    for task_id, task in workflow.tasks.items():
+        key = (task.model_data.id, depth(task_id))
+        task_counts[key] = task_counts.get(key, 0) + 1
+
+    finish: dict[int, float] = {}
+
+    def finish_by(task_id: int) -> float:
+        if task_id not in finish:
+            task = workflow.tasks[task_id]
+            rounds = math.ceil(task_counts[(task.model_data.id, depth(task_id))]
+                               / max(1, instances.get(task.model_data.id, 1)))
+            start = max([finish_by(t.id) for t in task.prev_tasks], default=0)
+            finish[task_id] = start + exec_times[task_id] * rounds
+        return finish[task_id]
+
+    return max(finish_by(task_id) for task_id in workflow.tasks)

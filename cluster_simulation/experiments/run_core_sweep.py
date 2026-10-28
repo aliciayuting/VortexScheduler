@@ -147,7 +147,8 @@ def job_runtime(family: str, workflow_id: int) -> float:
     charged for the rounds its own job forces it into: a stage fanned out into more
     tasks than its model has instances cannot run them at once, and a batch takes
     at most one task per job, so they queue behind each other even on an idle
-    cluster. It is what the job SLOs here are a multiple of, and the same quantity
+    cluster. Each stage runs at the speed of the partition size its model is placed
+    on, the slowest one if the model is placed on several. It is what the job SLOs here are a multiple of, and the same quantity
     plot_tail.get_workflow_job_sizes normalizes response times by.
 
     Args:
@@ -164,9 +165,11 @@ def job_runtime(family: str, workflow_id: int) -> float:
     tasks = {t["TASK_INDEX"]: t for t in cfg["TASKS"]}
 
     instances: dict[int, int] = {}
-    for _, model_ids in ALLOCATIONS[family]:
+    partition_sizes: dict[int, set[int]] = {}
+    for partition_size, model_ids in ALLOCATIONS[family]:
         for model_id in model_ids:
             instances[model_id] = instances.get(model_id, 0) + 1
+            partition_sizes.setdefault(model_id, set()).add(partition_size)
 
     # tasks only contend for a model's instances with tasks at the same DAG depth;
     # a later depth cannot start until the earlier one is done
@@ -190,7 +193,8 @@ def job_runtime(family: str, workflow_id: int) -> float:
         times = mcfg.MODELS[model_id]["MIG_BATCH_EXEC_TIMES"]
         rounds = math.ceil(task_counts[(model_id, depth(task_id))]
                            / max(1, instances.get(model_id, 1)))
-        return times[max(times)][1] * rounds
+        return max(times[size][1]
+                   for size in partition_sizes.get(model_id, {max(times)})) * rounds
 
     finish: dict[int, float] = {}
 

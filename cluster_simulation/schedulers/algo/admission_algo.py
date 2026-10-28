@@ -23,7 +23,8 @@ import core.workload as workload
 from core.job import Job
 from core.task import Task
 from core.data_models.workflow import Workflow
-from schedulers.algo.capacity_algo import (get_workflow_capacities,
+from schedulers.algo.capacity_algo import (get_job_runtime, get_task_exec_times,
+                                           get_workflow_capacities,
                                            get_workflow_stage_capacities)
 
 
@@ -239,7 +240,8 @@ class AdmissionController:
         for wid, capacity in self.capacities.items():
             rate = capacity * gcfg.ADMISSION_TARGET_UTILIZATION / 1000  # jobs/ms
             # time a job can afford to spend queued and still finish in time
-            slack = max(0.0, slos[wid] - workflows[wid].get_min_processing_time())
+            slack = max(0.0, slos[wid] - get_job_runtime(workflows[wid], workers,
+                                                         start_time))
 
             sizes[wid] = (rate, rate * slack)
             # all workflows draw on one cluster wide bucket under AGGREGATE
@@ -275,13 +277,16 @@ class AdmissionController:
         sizes = {}
         for wid, stages in stage_capacities.items():
             workflow = workflows[wid]
-            job_slack = max(0.0, slos[wid] - workflow.get_min_processing_time())
+            job_slack = max(0.0, slos[wid] - get_job_runtime(workflow, workers,
+                                                             start_time))
+            exec_times = get_task_exec_times(workflow, workers, start_time)
 
             for task_id, capacity in stages.items():
                 key = (wid, task_id)
                 self.capacities[key] = capacity
                 rate = capacity * gcfg.ADMISSION_TARGET_UTILIZATION / 1000  # jobs/ms
-                slack = self._get_stage_slack(workflow, task_id, job_slack)
+                slack = self._get_stage_slack(workflow, task_id, exec_times[task_id],
+                                              job_slack)
 
                 sizes[key] = (rate, rate * slack)
                 # a stage's budget is its share of the model it runs on, so under
@@ -328,20 +333,16 @@ class AdmissionController:
             self.buckets[bucket_key] = TokenBucket(rate, max(1.0, depth), start_time)
 
     @staticmethod
-    def _get_stage_slack(workflow: Workflow, task_id: int, job_slack: float) -> float:
-        """Returns the time a task of [task_id] can spend queued and still meet the
-        deadline of its stage, falling back to [job_slack] when the run has no
-        per-stage SLO split to read.
+    def _get_stage_slack(workflow: Workflow, task_id: int, exec_time: float,
+                         job_slack: float) -> float:
+        """Returns the time a task of [task_id], which takes [exec_time] ms to run,
+        can spend queued and still meet the deadline of its stage, falling back to
+        [job_slack] when the run has no per-stage SLO split to read.
         """
         if gcfg.SLO_TYPE == "JOB_LEVEL" or not workflow.task_slos:
             return job_slack
 
-        task = workflow.tasks[task_id]
-        # fastest this stage can run, matching the convention in
-        # Workflow.get_min_processing_time
-        min_exec_time = task.model_data.batch_exec_times[24][1]
-
-        return max(0.0, workflow.task_slos[task_id] - min_exec_time)
+        return max(0.0, workflow.task_slos[task_id] - exec_time)
 
     def should_reject(self, time: float, job: Job) -> bool:
         """Decides whether [job], which just arrived at the scheduler, should be
