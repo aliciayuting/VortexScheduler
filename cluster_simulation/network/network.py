@@ -31,8 +31,9 @@ class Network(EventListener):
         if event.type.id == EventIds.JOB_SENT_TO_SCHEDULER:
             transfer_time = 0
             if not event.kwargs["ignore_transfer_time"]:
-                msg_size = sum(t.input_size for t in event.kwargs["job"].tasks
-                               if len(t.required_task_ids) == 0)
+                # only the input ready at creation travels with the job
+                job = event.kwargs["job"]
+                msg_size = sum(t.input_size for t in job.get_released_source_tasks(job.create_time))
                 transfer_time = msg_size / 12500
             
             self.em.add_event(

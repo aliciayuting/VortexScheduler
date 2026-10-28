@@ -196,7 +196,8 @@ def get_job_runtime(workflow: Workflow, workers: dict, time: float = 0) -> float
     into: a stage fanned out into more tasks than its model has instances cannot
     run them at once, and a batch takes at most one task per job, so they queue
     behind each other even on an idle cluster. Tasks only contend for a model's
-    instances with tasks at the same DAG depth. Mirrors job_runtime in
+    instances with tasks at the same DAG depth released at the same time, and a
+    source task cannot start before its input arrives. Mirrors job_runtime in
     experiments/run_core_sweep.py, which computes the same quantity from the
     config alone.
 
@@ -225,19 +226,23 @@ def get_job_runtime(workflow: Workflow, workers: dict, time: float = 0) -> float
                                   default=0)
         return depths[task_id]
 
-    task_counts: dict[tuple[int, int], int] = {}
-    for task_id, task in workflow.tasks.items():
-        key = (task.model_data.id, depth(task_id))
-        task_counts[key] = task_counts.get(key, 0) + 1
+    def stage(task_id: int) -> tuple[int, int, float]:
+        task = workflow.tasks[task_id]
+        return (task.model_data.id, depth(task_id), task.arrival_offset)
+
+    task_counts: dict[tuple[int, int, float], int] = {}
+    for task_id in workflow.tasks:
+        task_counts[stage(task_id)] = task_counts.get(stage(task_id), 0) + 1
 
     finish: dict[int, float] = {}
 
     def finish_by(task_id: int) -> float:
         if task_id not in finish:
             task = workflow.tasks[task_id]
-            rounds = math.ceil(task_counts[(task.model_data.id, depth(task_id))]
+            rounds = math.ceil(task_counts[stage(task_id)]
                                / max(1, instances.get(task.model_data.id, 1)))
-            start = max([finish_by(t.id) for t in task.prev_tasks], default=0)
+            start = max([finish_by(t.id) for t in task.prev_tasks],
+                        default=task.arrival_offset)
             finish[task_id] = start + exec_times[task_id] * rounds
         return finish[task_id]
 

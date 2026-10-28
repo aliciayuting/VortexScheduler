@@ -64,6 +64,7 @@ class Scheduler(EventListener):
             EVENT_TYPES[EventIds.TASKS_ASSIGNED_TO_WORKER],
             EVENT_TYPES[EventIds.TASKS_INPUTS_SENT_TO_WORKER],
             EVENT_TYPES[EventIds.TASKS_OUTPUTS_ASSIGNED_TO_WORKER],
+            EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
             EVENT_TYPES[EventIds.JOBS_DROPPED],
             EVENT_TYPES[EventIds.JOBS_SHADOW_DROPPED]
         })
@@ -74,7 +75,9 @@ class Scheduler(EventListener):
             if self._reject_on_arrival(event.time, job):
                 return
 
-            source_tasks = [t for t in job.tasks if len(t.required_task_ids) == 0]
+            # source tasks whose input has not arrived yet are held back until it
+            # does (see [_defer_unreleased_tasks])
+            source_tasks = job.get_released_source_tasks(event.time)
             if self._reject_tasks(event.time, source_tasks):
                 return
 
@@ -82,6 +85,7 @@ class Scheduler(EventListener):
             if self._drop_jobs(event.time, source_tasks):
                 return
 
+            self._defer_unreleased_tasks(event.time, job)
             self.on_job_arrival(event.time, job)
 
         elif event.type.id == EventIds.TASKS_ARRIVAL_AT_SCHEDULER:
@@ -120,6 +124,31 @@ class Scheduler(EventListener):
                                  event.kwargs["model_instance_id"])
         else:
             raise ValueError(f"Scheduler received unregistered event: {event}")
+
+    def _defer_unreleased_tasks(self, time: float, job: Job):
+        """Schedules the source tasks of [job] whose input arrives after [time] to
+        reach this scheduler when it does, as TASKS_ARRIVAL_AT_SCHEDULER.
+
+        From there they take the same path as any later stage: admission control,
+        drop policies and dispatch all see them at their own release time, and
+        none of it fires for a job that was rejected or dropped in the meantime.
+
+        Args:
+            time: Time [job] arrived at the scheduler
+            job: Job whose late inputs to schedule
+        """
+        deferred: dict[float, list[Task]] = {}
+        for task in job.get_source_tasks():
+            release_time = job.get_release_time(task)
+            if release_time > time:
+                deferred.setdefault(release_time, []).append(task)
+
+        for release_time, tasks in sorted(deferred.items()):
+            self.em.add_event(
+                Event(release_time,
+                      EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
+                      kwargs={"tasks": tasks}),
+                self.emitter_id)
 
     def _reject_on_arrival(self, time: float, job: Job) -> bool:
         """Applies job level admission control to a job that just arrived,

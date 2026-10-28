@@ -61,6 +61,20 @@ class Job(object):
 
         return min(_get_min_proc_time(t, initial_proc_times) for t in self.tasks if not t.next_task_ids)
 
+    def get_source_tasks(self) -> list[Task]:
+        return [t for t in self.tasks if len(t.required_task_ids) == 0]
+
+    def get_release_time(self, task: Task) -> float:
+        """Returns when [task]'s input becomes available: job creation plus its
+        ARRIVAL_OFFSET. Only meaningful for source tasks; the rest are released by
+        their predecessors finishing.
+        """
+        return self.create_time + task.arrival_offset
+
+    def get_released_source_tasks(self, time: float) -> list[Task]:
+        """Returns the source tasks whose input has arrived by [time]."""
+        return [t for t in self.get_source_tasks() if self.get_release_time(t) <= time]
+
     def get_task_by_id(self, task_id) -> Task:
         for task in self.tasks:
             if task.task_id == task_id:

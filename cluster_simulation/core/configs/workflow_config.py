@@ -53,6 +53,52 @@ def _build_object_defect_tasks():
     return detector_tasks
 
 
+def _build_time_series_defect_tasks():
+    """Build the time-series variant of the defect-inspection DAG.
+
+    Same 3 rounds x 8 cameras x 2 YOLOv5 detectors as
+    [_build_object_defect_tasks], but the rounds are captured over time rather
+    than run in sequence: round r's 8 images arrive ARRIVAL_OFFSET = 70 * (r - 1)
+    ms after the job is created, and no detection depends on another. Only the
+    final aggregation waits, on all 48 detection results.
+    """
+    image_size_kb = 1000
+    detection_result_size_kb = 10
+    round_interval_ms = 70
+    aggregate_task_index = 3 * 8 * 2
+    detector_tasks = []
+
+    for round_id in range(1, 4):
+        for camera_id in range(1, 9):
+            for detector, model_id in (("crack", 17), ("hole", 18)):
+                detector_tasks.append({
+                    "MODEL_ID": model_id,
+                    "TASK_INDEX": len(detector_tasks),
+                    "PREV_TASK_INDEX": [],
+                    "NEXT_TASK_INDEX": [aggregate_task_index],
+                    "INPUT_SIZE": image_size_kb,
+                    "OUTPUT_SIZE": detection_result_size_kb,
+                    "SLO": 0,
+                    "ARRIVAL_OFFSET": (round_id - 1) * round_interval_ms,
+                    "ROUND": round_id,
+                    "CAMERA_ID": camera_id,
+                    "DETECTOR": detector,
+                })
+
+    detector_tasks.append({
+        "MODEL_ID": 19,
+        "TASK_INDEX": aggregate_task_index,
+        "PREV_TASK_INDEX": list(range(aggregate_task_index)),
+        "NEXT_TASK_INDEX": [],
+        "INPUT_SIZE": 48 * detection_result_size_kb,
+        "OUTPUT_SIZE": detection_result_size_kb,
+        "SLO": 0,
+        "AGGREGATES_RESULTS": 48,
+        "IMAGE_COUNT": 24,
+    })
+    return detector_tasks
+
+
 def _build_cow_teat_health_tasks():
     """Build the cow-ID and four-subframe teat-health inspection DAG."""
     image_size_kb = 1000
@@ -560,6 +606,12 @@ WORKFLOW_LIST = [
      "DESCRIPTION": ("OCR cow ID in parallel with Faster R-CNN segmentation; "
                      "classify shape and skin condition for four teat subframes"),
      "TASKS": _build_cow_teat_health_tasks(),
+    },
+    {"JOB_TYPE": 14,     # time-series WF12: 3 rounds of images arriving 70 ms apart, no inter-round deps
+     "JOB_NAME": "time_series_defect_inspection",
+     "DESCRIPTION": ("3 rounds x 8 cameras x 2 YOLOv5 detectors, rounds arriving 70 ms "
+                     "apart and inspected independently; aggregate 48 results from 24 images"),
+     "TASKS": _build_time_series_defect_tasks(),
     },
 ]
 

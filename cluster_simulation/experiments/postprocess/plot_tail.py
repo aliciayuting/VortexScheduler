@@ -120,17 +120,22 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
             return depths[tid]
 
         # executions a stage of this job must run back to back, because the job has
-        # more tasks on that model at that depth than the allocation gives it instances
-        task_counts: dict[tuple[int, int], int] = {}
-        for tid, task in tasks.items():
-            key = (task["MODEL_ID"], depth(tid))
-            task_counts[key] = task_counts.get(key, 0) + 1
+        # more tasks on that model at that depth, released at the same time, than
+        # the allocation gives it instances
+        def stage(tid: int) -> tuple[int, int, float]:
+            return (tasks[tid]["MODEL_ID"], depth(tid),
+                    tasks[tid].get("ARRIVAL_OFFSET", 0))
+
+        task_counts: dict[tuple[int, int, float], int] = {}
+        for tid in tasks:
+            task_counts[stage(tid)] = task_counts.get(stage(tid), 0) + 1
 
         rounds = {key: math.ceil(count / max(1, instance_counts.get(key[0], 1)))
                   for key, count in task_counts.items()}
 
         # walk the DAG in topological order accumulating the longest path. A task
-        # cannot start until every predecessor is done, hence max over predecessors.
+        # cannot start until every predecessor is done, hence max over predecessors,
+        # nor a source task before its input arrives.
         finish_by: dict[int, float] = {}
         ready = [t for t in tasks.values() if not t["PREV_TASK_INDEX"]]
         while ready:
@@ -140,9 +145,10 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
                 if tid in finish_by:
                     continue
 
-                start = max([finish_by[p] for p in task["PREV_TASK_INDEX"]], default=0)
+                start = max([finish_by[p] for p in task["PREV_TASK_INDEX"]],
+                            default=task.get("ARRIVAL_OFFSET", 0))
                 finish_by[tid] = start + (exec_times[task["MODEL_ID"]]
-                                          * rounds[(task["MODEL_ID"], depth(tid))]
+                                          * rounds[stage(tid)]
                                           if task["MODEL_ID"] >= 0 else 0)
 
                 next_ready.extend([

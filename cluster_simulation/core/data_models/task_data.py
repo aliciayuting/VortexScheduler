@@ -10,13 +10,16 @@ class TaskData:
     """
 
     def __init__(self, id: int, model_data: ModelData | None, input_size: float, output_size: float,
-                 slo: float | None):
+                 slo: float | None, arrival_offset: float = 0):
 
         self.id = id
         self.model_data = model_data
         self.input_size = input_size
         self.output_size = output_size
         self.slo = slo
+        # ms after job creation that this task's input arrives, for a source task
+        # whose input is produced over time rather than all at once
+        self.arrival_offset = arrival_offset
 
         self.prev_tasks: list[TaskData] = []
         self.next_tasks: list[TaskData] = []
@@ -48,7 +51,8 @@ class TaskData:
                     self.model_data,
                     self.input_size,
                     self.output_size,
-                    self.slo if gcfg.SLO_TYPE != "JOB_LEVEL" else 0)
+                    self.slo if gcfg.SLO_TYPE != "JOB_LEVEL" else 0,
+                    self.arrival_offset)
         
         for prev_task in self.prev_tasks:
             task.required_task_ids.append(prev_task.id)

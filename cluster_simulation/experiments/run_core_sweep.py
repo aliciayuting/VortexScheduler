@@ -64,6 +64,11 @@ ALLOCATIONS = {
              (6, [17]), (6, [17]), (6, [17]), (6, [17, 19]),
              (6, [18]), (6, [18]), (6, [18]), (6, [18]),
              (6, [18]), (6, [18]), (6, [18]), (6, [18])],
+    # WF14: WF12's detections with the images arriving over time, on WF12's placement
+    "wf14": [(6, [17]), (6, [17]), (6, [17]), (6, [17]),
+             (6, [17]), (6, [17]), (6, [17]), (6, [17, 19]),
+             (6, [18]), (6, [18]), (6, [18]), (6, [18]),
+             (6, [18]), (6, [18]), (6, [18]), (6, [18])],
     # WF13: the Vortex planner's placement on 8 GPUs
     "wf13": [(12, [21]), (12, [21]), (12, [21]), (12, [21]), (12, [21, 24]),
              (12, [22]), (12, [22]), (12, [22]), (12, [22]),
@@ -87,12 +92,17 @@ ALLOCATIONS = {
 }
 
 # the workflows sharing the cluster in each family
-FAMILIES = {"wf12": [12], "wf13": [13], "wf6": [6], "wf6variants": [6, 7, 8],
+FAMILIES = {"wf12": [12], "wf13": [13], "wf14": [14], "wf6": [6], "wf6variants": [6, 7, 8],
             "ppl2": [1], "ppl2mt": [1, 4, 5]}
 
 # Each tenant's job SLO is this many times its own job runtime
 SLO_MULTIPLES = {"wf12": 5, "wf13": 5,
                  "wf6": 5, "wf6variants": 5, "ppl2": 5, "ppl2mt": 5}
+
+# families held to another family's job SLO instead, as (family, workflow ID) to
+# take it from. WF14 runs WF12's detections with the images arriving over time, and
+# keeps WF12's deadline so the two differ only in when the input arrives
+SLO_FROM = {"wf14": ("wf12", 12)}
 
 
 def _const(rate: int, num_jobs: int) -> dict:
@@ -117,6 +127,8 @@ def _burst(rate: int, burst_rate: int, quiet: int, burst: int,
 WORKLOADS = {
     ("wf12", "const"): {12: _const(38, 20000)},
     ("wf12", "burst"): {12: _burst(32, 80, 40000, 10000, 400000, 105000)},
+    ("wf14", "const"): {14: _const(38, 20000)},
+    ("wf14", "burst"): {14: _burst(32, 80, 40000, 10000, 400000, 105000)},
     ("wf13", "const"): {13: _const(122, 20000)},
     ("wf13", "burst"): {13: _burst(80, 200, 30000, 10000, 160000, 40000)},
 
@@ -148,7 +160,10 @@ def job_runtime(family: str, workflow_id: int) -> float:
     tasks than its model has instances cannot run them at once, and a batch takes
     at most one task per job, so they queue behind each other even on an idle
     cluster. Each stage runs at the speed of the partition size its model is placed
-    on, the slowest one if the model is placed on several. It is what the job SLOs here are a multiple of, and the same quantity
+    on, the slowest one if the model is placed on several. A source task whose
+    input arrives ARRIVAL_OFFSET ms after the job is created cannot start before
+    then, and only contends with tasks released at the same time. It is what the
+    job SLOs here are a multiple of, and the same quantity
     plot_tail.get_workflow_job_sizes normalizes response times by.
 
     Args:
@@ -171,8 +186,9 @@ def job_runtime(family: str, workflow_id: int) -> float:
             instances[model_id] = instances.get(model_id, 0) + 1
             partition_sizes.setdefault(model_id, set()).add(partition_size)
 
-    # tasks only contend for a model's instances with tasks at the same DAG depth;
-    # a later depth cannot start until the earlier one is done
+    # tasks only contend for a model's instances with tasks at the same DAG depth
+    # released at the same time; a later depth cannot start until the earlier one
+    # is done
     depths: dict[int, int] = {}
 
     def depth(task_id: int) -> int:
@@ -183,7 +199,7 @@ def job_runtime(family: str, workflow_id: int) -> float:
 
     task_counts: dict[tuple[int, int], int] = {}
     for task_id, task in tasks.items():
-        key = (task["MODEL_ID"], depth(task_id))
+        key = (task["MODEL_ID"], depth(task_id), task.get("ARRIVAL_OFFSET", 0))
         task_counts[key] = task_counts.get(key, 0) + 1
 
     def exec_time(task_id: int) -> float:
@@ -191,7 +207,8 @@ def job_runtime(family: str, workflow_id: int) -> float:
         if model_id < 0:
             return 0.0
         times = mcfg.MODELS[model_id]["MIG_BATCH_EXEC_TIMES"]
-        rounds = math.ceil(task_counts[(model_id, depth(task_id))]
+        rounds = math.ceil(task_counts[(model_id, depth(task_id),
+                                        tasks[task_id].get("ARRIVAL_OFFSET", 0))]
                            / max(1, instances.get(model_id, 1)))
         return max(times[size][1]
                    for size in partition_sizes.get(model_id, {max(times)})) * rounds
@@ -201,11 +218,20 @@ def job_runtime(family: str, workflow_id: int) -> float:
     def finish_by(task_id: int) -> float:
         if task_id not in finish:
             task = tasks[task_id]
-            start = max([finish_by(p) for p in task["PREV_TASK_INDEX"]], default=0)
+            start = max([finish_by(p) for p in task["PREV_TASK_INDEX"]],
+                        default=task.get("ARRIVAL_OFFSET", 0))
             finish[task_id] = start + exec_time(task_id)
         return finish[task_id]
 
     return max(finish_by(task_id) for task_id in tasks)
+
+
+def job_slo(family: str, workflow_id: int) -> int:
+    """Returns the job SLO (ms) [workflow_id] is given in [family]: SLO_MULTIPLES
+    times its own job runtime, or the SLO of the workflow SLO_FROM names.
+    """
+    family, workflow_id = SLO_FROM.get(family, (family, workflow_id))
+    return int(job_runtime(family, workflow_id) * SLO_MULTIPLES[family])
 
 
 def config_names() -> list[str]:
@@ -256,11 +282,9 @@ def flat_drop_rate(out_dir: str, family: str, workload: str) -> float:
 def _overrides(config_name: str, exec_time_distribution: str,
                out_dir: str | None = None) -> dict:
     family, workload, policy = _parse(config_name)
-    multiple = SLO_MULTIPLES[family]
 
     overrides = {"CLIENT_CONFIGS": [
-                     {wid: {"WORKLOAD": wl,
-                            "SLO": int(job_runtime(family, wid) * multiple)}}
+                     {wid: {"WORKLOAD": wl, "SLO": job_slo(family, wid)}}
                      for wid, wl in WORKLOADS[(family, workload)].items()],
                  "ALLOCATION_STRATEGY": "CUSTOM",
                  "CUSTOM_ALLOCATION": ALLOCATIONS[family],

@@ -64,6 +64,19 @@ CLIENT_CONFIGS = [
     #                               {"KIND": "CONSTANT", "RATE": 32, "DURATION": 105000}]},
     #       "SLO": int(45.1 * 5)}},
 
+    # WF14 (time-series object defect inspection). Its 3 rounds of images arrive 70 ms apart
+    # {14: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 38, "NUM_JOBS": 20000}]},
+    #       "SLO": int(45.1 * 5)}},
+
+    # WF14 (time-series object defect inspection) with spikes
+    # {14: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "BURST", "RATE": 32, "BURST_RATE": 80,
+    #                                "QUIET_DURATION": 40000, "BURST_DURATION": 10000,
+    #                                "STOCHASTIC": False, "DURATION": 400000},
+    #                               {"KIND": "CONSTANT", "RATE": 32, "DURATION": 105000}]},
+    #       "SLO": int(45.1 * 5)}},
+
     # WF13 (dairy cow teat health detection)
     # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 122, "NUM_JOBS": 20000}]},

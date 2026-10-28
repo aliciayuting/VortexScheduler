@@ -21,14 +21,24 @@ class Workflow:
                 models[cfg["MODEL_ID"]],
                 cfg["INPUT_SIZE"],
                 cfg["OUTPUT_SIZE"],
-                cfg["SLO"] if slo_type != "JOB_LEVEL" else None)
+                cfg["SLO"] if slo_type != "JOB_LEVEL" else None,
+                cfg.get("ARRIVAL_OFFSET", 0))
             
             self.tasks[task.id] = task
 
             if len(cfg["PREV_TASK_INDEX"]) == 0:
                 self.initial_tasks.append(task)
 
+            # a task with predecessors is released by them, not by the client
+            assert(task.arrival_offset == 0 or len(cfg["PREV_TASK_INDEX"]) == 0), \
+                f"Task {task.id} of workflow {self.id} has an ARRIVAL_OFFSET but is " \
+                "not a source task"
+            assert(task.arrival_offset >= 0)
+
         assert(len(self.initial_tasks) > 0)
+        # the job itself arrives with whatever input is ready at creation
+        assert(any(t.arrival_offset == 0 for t in self.initial_tasks)), \
+            f"Workflow {self.id} has no source task released at job creation"
         
         for cfg in workflow_cfg["TASKS"]:
             task = self.tasks[cfg["TASK_INDEX"]]

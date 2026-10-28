@@ -48,8 +48,7 @@ class ShepherdScheduler(Scheduler):
 
     def on_job_arrival(self, time: float, job: Job):
         self.arrived_jobs[job.id] = job
-        return self.on_tasks_arrival(time, 
-                                     [t for t in job.tasks if len(t.required_task_ids) == 0])
+        return self.on_tasks_arrival(time, job.get_released_source_tasks(time))
     
 
     def on_tasks_arrival(self, time: float, tasks: list[Task]):

@@ -103,24 +103,25 @@ class Logger(EventListener):
             job: Job = event.kwargs["job"]
             self.unfinished_jobs.add(job.id)
             idle = self._get_curr_idle_instances(event.time)
-            for task in job.tasks:
-                if len(task.required_task_ids) == 0:
-                    self._add_task_row({
-                        "job_id": job.id, "task_id": task.task_id, "client_id": job.client_id,
-                        "model_id": task.model_data.id, "workflow_id": job.job_type_id,
-                        "executing_worker_id": "N/A",
-                        "arrival_at_scheduler_timestamp": event.time,
-                        "last_dep_dispatch_timestamp": np.nan,
-                        "arrival_at_worker_timestamp": np.nan,
-                        "execution_start_timestamp": np.nan,
-                        "execution_end_timestamp": np.nan,
-                        "dropped_timestamp": np.nan,
-                        "shadow_dropped_timestamp": np.nan,
-                        "shadow_dropped_task_id": np.nan,
-                        "curr_unfinished_jobs": len(self.unfinished_jobs),
-                        "curr_idle_instances": idle,
-                        "executing_worker_qlen_at_arrival": np.nan,
-                    })
+            # source tasks released later are logged when they arrive, as
+            # TASKS_ARRIVAL_AT_SCHEDULER
+            for task in job.get_released_source_tasks(event.time):
+                self._add_task_row({
+                    "job_id": job.id, "task_id": task.task_id, "client_id": job.client_id,
+                    "model_id": task.model_data.id, "workflow_id": job.job_type_id,
+                    "executing_worker_id": "N/A",
+                    "arrival_at_scheduler_timestamp": event.time,
+                    "last_dep_dispatch_timestamp": np.nan,
+                    "arrival_at_worker_timestamp": np.nan,
+                    "execution_start_timestamp": np.nan,
+                    "execution_end_timestamp": np.nan,
+                    "dropped_timestamp": np.nan,
+                    "shadow_dropped_timestamp": np.nan,
+                    "shadow_dropped_task_id": np.nan,
+                    "curr_unfinished_jobs": len(self.unfinished_jobs),
+                    "curr_idle_instances": idle,
+                    "executing_worker_qlen_at_arrival": np.nan,
+                })
 
         elif event.type.id == EventIds.TASKS_ARRIVAL_AT_SCHEDULER:
             tasks: list[Task] = event.kwargs["tasks"]

@@ -6,7 +6,7 @@ import core.configs.gen_config as gcfg
 class Task(object):
     def __init__(self, job, task_id: int, model_data: ModelData | None,
                  input_size: float, result_size: float,
-                 slo: float | None=None):
+                 slo: float | None=None, arrival_offset: float = 0):
 
         self.job = job
         self.task_id = task_id
@@ -14,6 +14,8 @@ class Task(object):
         self.input_size = input_size
         self.result_size = result_size
         self.slo = slo
+        # ms after job creation that this task's input arrives (source tasks only)
+        self.arrival_offset = arrival_offset
         
         # list of Tasks (inputs) that this task requires ( list will be appended as the job generated)
         self.required_task_ids = []                        # list of task ids
