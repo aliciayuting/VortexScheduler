@@ -17,6 +17,8 @@ Usage (from cluster_simulation/, after `source set_env.sh`):
 """
 
 import argparse
+import glob
+import json
 import os
 import subprocess
 import sys
@@ -26,9 +28,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 FAMILIES = [("ppl2", "WF1 (pipeline 2)"), ("wf6", "WF6 (textvision)"),
-            ("wf12", "WF12 (defect inspection)"), ("wf13", "WF13 (cow teat health)")]
+            ("wf12", "WF12 (defect inspection)"), ("wf13", "WF13 (cow teat health)"),
+            ("wf14", "WF14 (time-series defect inspection)")]
 # runs missing for a scale (0.125x exists only for WF6) are skipped
 SCALES = [0.125, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+
+# right edge of each family's tail plot, in multiples of job size. WF14's SLO is
+# only 1.45x its job size (it shares WF12's), so its tail sits well left of 10x
+TAIL_XMAX = {"wf14": 4}
 
 # categorical slots 1 and 2, as in plot_slo_sweep.py
 SERIES = [("const", "constant", "#2a78d6"), ("burst", "bursty", "#eb6834")]
@@ -39,15 +46,43 @@ GRID = "#dedcd6"
 SURFACE = "#fcfcfb"
 
 
+def _run_dir(src: str, family: str, workload: str, scale: float) -> str | None:
+    """Returns the run of [scale] for [family] under [workload], whether or not its
+    name carries a refill rate (`_rate<r>`), or None if the sweep did not run it.
+    """
+    name = f"{family}_{workload}_{scale:g}x"
+    runs = [d for d in [os.path.join(src, name)] + glob.glob(os.path.join(src, name + "_rate*"))
+            if os.path.isdir(d)]
+    assert(len(runs) <= 1), f"several runs of {name} in {src}: {runs}"
+    return runs[0] if runs else None
+
+
+def _refill_rate(run_dir: str) -> float:
+    """Returns the refill rate a run used, as a fraction of estimated capacity."""
+    with open(os.path.join(run_dir, "overrides.json")) as f:
+        overrides = json.load(f)["overrides"]
+    if "ADMISSION_TARGET_UTILIZATION" in overrides:
+        return overrides["ADMISSION_TARGET_UTILIZATION"]
+
+    # not overridden: the default the run's config snapshot held
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "snapshot", os.path.join(run_dir, "configs", "gen_config.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ADMISSION_TARGET_UTILIZATION
+
+
 def summarize(src: str) -> pd.DataFrame:
     """Returns one row per run: its bucket size and how its jobs fared."""
     rows = []
     for family, _ in FAMILIES:
         for workload, _, _ in SERIES:
             for scale in SCALES:
-                run = os.path.join(src, f"{family}_{workload}_{scale:g}x", "sim_logs")
-                if not os.path.isdir(run):
+                run_dir = _run_dir(src, family, workload, scale)
+                if run_dir is None:
                     continue
+                run = os.path.join(run_dir, "sim_logs")
 
                 jobs = pd.read_csv(os.path.join(run, "job_log.csv"))
                 done = jobs["was_completed"].astype(bool)
@@ -55,6 +90,7 @@ def summarize(src: str) -> pd.DataFrame:
                 adm = pd.read_csv(os.path.join(run, "admission_control.csv")).iloc[0]
 
                 rows.append({"family": family, "workload": workload, "scale": scale,
+                             "refill_rate": _refill_rate(run_dir),
                              "burst_size_jobs": adm["burst_size_jobs"],
                              "jobs": len(jobs),
                              "rejected": adm["num_rejected"] / len(jobs),
@@ -83,6 +119,8 @@ def plot_summary(summary: pd.DataFrame, out_path: str):
     """
     # only the workflows this sweep directory actually ran
     families = [(f, n) for f, n in FAMILIES if (summary["family"] == f).any()]
+    # and only the bucket sizes it ran, so a narrower sweep fills the axis
+    scales = [s for s in SCALES if (summary["scale"] == s).any()]
 
     fig, axes = plt.subplots(2, len(families), figsize=(4 * len(families), 7.5),
                              sharex=True, sharey="row", squeeze=False)
@@ -91,6 +129,10 @@ def plot_summary(summary: pd.DataFrame, out_path: str):
         rows = summary[summary["family"] == family]
         derived = rows.loc[rows["scale"] == 1.0, "burst_size_jobs"]
         title = f"{name}\nderived bucket: {derived.iloc[0]:.1f} jobs" if len(derived) else name
+        # the refill rate each workload ran at, as a fraction of estimated capacity
+        rates = rows.groupby("workload")["refill_rate"].first()
+        title += "\nrefill rate: " + ", ".join(f"{w} {rates[w]:g}" for w, _, _ in SERIES
+                                               if w in rates)
 
         for row, (metric, ylabel) in enumerate(
                 [("slo_met", "Jobs meeting the SLO (%)"),
@@ -108,9 +150,9 @@ def plot_summary(summary: pd.DataFrame, out_path: str):
                         markeredgecolor=SURFACE, markeredgewidth=2)
 
             ax.set_xscale("log", base=2)
-            ax.set_xticks(SCALES)
+            ax.set_xticks(scales)
             # the log axis packs 1.25x-2x together, so only every other one is labeled
-            ax.set_xticklabels([f"{s:g}×" if s not in (1.25, 1.75) else "" for s in SCALES])
+            ax.set_xticklabels([f"{s:g}×" if s not in (1.25, 1.75) else "" for s in scales])
             ax.minorticks_off()
             if col == 0:
                 ax.set_ylabel(ylabel, color=INK_SECONDARY, fontsize=10)
@@ -133,13 +175,13 @@ def plot_tails(src: str, fig_dir: str):
     plot_tail = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plot_tail.py")
     for family, _ in FAMILIES:
         for workload, _, _ in SERIES:
-            runs = [(s, os.path.join(src, f"{family}_{workload}_{s:g}x", "sim_logs"))
-                    for s in SCALES]
-            runs = [(s, r) for s, r in runs if os.path.isdir(r)]
+            runs = [(s, _run_dir(src, family, workload, s)) for s in SCALES]
+            runs = [(s, os.path.join(r, "sim_logs")) for s, r in runs if r is not None]
             if not runs:
                 continue
             subprocess.run(
-                [sys.executable, plot_tail, "--pdf", "--normalize", "--xmax", "10",
+                [sys.executable, plot_tail, "--pdf", "--normalize",
+                 "--xmax", str(TAIL_XMAX.get(family, 10)),
                  "--srcs"] + [r for _, r in runs]
                 + ["--labels"] + [f"bucket {s:g}×" for s, _ in runs]
                 + ["--groups"] + ["bucket size"] * len(runs)

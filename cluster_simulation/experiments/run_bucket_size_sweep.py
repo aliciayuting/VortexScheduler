@@ -10,6 +10,12 @@ Every run is a core sweep configuration with only the bucket size changed, so th
 1x runs reproduce the core sweep's `token` runs, and every scale of a given
 workload sees the same arrival trace. Results land in [out]/[config name]/.
 
+A configuration may also carry a refill rate (`_rate<r>`, as a fraction of the
+estimated capacity, i.e. ADMISSION_TARGET_UTILIZATION). Its bucket sizes stay
+multiples of the bucket derived at the configured default rate, the same buckets
+as without one, so the 1x runs reproduce run_refill_rate_sweep.py's run at that
+rate.
+
 Usage (from cluster_simulation/, after `source set_env.sh`):
     python experiments/run_bucket_size_sweep.py --name bucket_size_sweep
 """
@@ -30,10 +36,12 @@ for _path in (SIM_DIR, EXP_DIR):
 os.environ.setdefault("SIMULATION_DIR", SIM_DIR)
 
 import run_core_sweep
+from run_refill_rate_sweep import RATES
 
 # core sweep families running a single workflow: pipeline 2 (WF1), textvision
-# (WF6), object defect inspection (WF12) and dairy cow teat health (WF13)
-FAMILIES = ["ppl2", "wf6", "wf12", "wf13"]
+# (WF6), object defect inspection (WF12), dairy cow teat health (WF13) and
+# time-series defect inspection (WF14)
+FAMILIES = ["ppl2", "wf6", "wf12", "wf13", "wf14"]
 
 # multiples of the derived bucket size
 # 0.125x is only run for WF6, whose SLO attainment was still climbing at 0.25x
@@ -41,15 +49,28 @@ SCALES = [0.125, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
 
 def config_names() -> list[str]:
-    return [f"{family}_{workload}_{scale:g}x" for family, workload, scale
-            in itertools.product(FAMILIES, ["const", "burst"], SCALES)]
+    names = [f"{family}_{workload}_{scale:g}x" for family, workload, scale
+             in itertools.product(FAMILIES, ["const", "burst"], SCALES)]
+    return names + [f"{name}_rate{rate:g}" for name in names for rate in RATES]
 
 
 def _overrides(config_name: str) -> dict:
-    family, workload, scale = config_name.split("_")
+    import core.configs.gen_config as gcfg
+
+    family, workload, scale, *rate = config_name.split("_")
+    scale = float(scale[:-1])
+
     overrides = run_core_sweep._overrides(f"{family}_{workload}_token", "NORMAL")
     overrides["ADMISSION_BURST_SIZE"] = None
-    overrides["ADMISSION_BURST_SCALE"] = float(scale[:-1])
+    overrides["ADMISSION_BURST_SCALE"] = scale
+
+    if rate:
+        rate = float(rate[0][len("rate"):])
+        overrides["ADMISSION_TARGET_UTILIZATION"] = rate
+        # the derived bucket scales with the refill rate; undo that, so [scale] stays
+        # a multiple of the bucket at the default rate
+        overrides["ADMISSION_BURST_SCALE"] = scale * gcfg.ADMISSION_TARGET_UTILIZATION / rate
+
     return overrides
 
 

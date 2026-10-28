@@ -290,10 +290,17 @@ class Simulation:
     def _produce_admission_control_log(self):
         """Writes what admission control did to each workflow: the capacity it
         estimated, the rate and burst size it allowed, and how many jobs it turned
-        away.
+        away. Under TOKEN_BUCKET also writes the level of every bucket at each
+        decision it made.
         """
         stats = self.scheduler.admission_controller.get_stats()
         pd.DataFrame(stats).to_csv(os.path.join(self.out_path, "admission_control.csv"))
+
+        # the bucket's level at every admission decision, for plotting it over time
+        token_log = self.scheduler.admission_controller.get_token_log()
+        if token_log:
+            pd.DataFrame(token_log).to_csv(os.path.join(self.out_path, "token_bucket_log.csv"),
+                                           index=False)
 
 
     def _produce_nexus_slo_split_log(self):

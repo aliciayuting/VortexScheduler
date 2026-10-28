@@ -15,10 +15,12 @@ Every run uses job-level SLOs, so a job carries one deadline for the whole
 pipeline and LOOKAHEAD weighs its entire remaining critical path against it. The
 per-stage split is a separate mechanism and is not used here.
 
-The workloads are multi-tenant on purpose. Under job-level SLOs a job's EDF key
-is its create time plus its SLO, so with a single workflow EDF and FCFS order the
-queue identically and only differ once tenants with different SLOs share the
-cluster.
+The multi-tenant workloads are what the orderings are compared on. Under
+job-level SLOs a job's EDF key is its create time plus its SLO, so with a single
+workflow EDF and FCFS order the queue identically and only differ once tenants
+with different SLOs share the cluster. The single-tenant tenancies (WF1, WF6,
+WF12, WF13, WF14 on their own, on the core sweep's allocations and workloads)
+therefore run under FCFS only, and only with the ahead-of-it accounting.
 
 Each tenancy is run under a constant and a bursty workload, across job SLOs from
 3x to 10x each workflow's job size (its critical path at batch size 1), so every
@@ -44,6 +46,13 @@ import sys
 SIM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXP_DIR = os.path.join(SIM_DIR, "experiments")
 
+for _path in (SIM_DIR, EXP_DIR):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+os.environ.setdefault("SIMULATION_DIR", SIM_DIR)
+
+import run_core_sweep
+
 # job size (ms) per workflow: its critical path at batch size 1, which each
 # tenant's job SLO is set as a multiple of
 JOB_SIZES = {1: 256.1, 4: 787.0, 5: 388.7,
@@ -57,6 +66,13 @@ SLO_MULTIPLES = [3, 4, 5, 6, 7, 8, 9, 10]
 TENANCIES = {"ppl2": [1, 4, 5],
              "textvision": [6, 7, 8],
              "textvisionswapped": [6, 10, 11]}
+
+# single-tenant tenancies, each the core sweep family running that one workflow.
+# Their allocation, workloads and job sizes are the core sweep's
+SINGLE_TENANCIES = {"wf1": "ppl2", "wf6": "wf6", "wf12": "wf12", "wf13": "wf13",
+                    "wf14": "wf14"}
+for _tenancy, _family in SINGLE_TENANCIES.items():
+    TENANCIES[_tenancy] = run_core_sweep.FAMILIES[_family]
 
 # When set, every tenant of a tenancy is given the same job SLO, that of its
 # slowest pipeline, instead of each being given a multiple of its own job size.
@@ -80,6 +96,8 @@ ALLOCATIONS = {
                    (6, [0, 2]), (6, [14]), (6, [15]), (6, [16]), (6, [])],
 }
 ALLOCATIONS["textvisionswapped"] = ALLOCATIONS["textvision"]
+for _tenancy, _family in SINGLE_TENANCIES.items():
+    ALLOCATIONS[_tenancy] = run_core_sweep.ALLOCATIONS[_family]
 
 def _const(rate: int, num_jobs: int) -> dict:
     return {"ARRIVAL_PROCESS": "POISSON",
@@ -120,6 +138,10 @@ WORKLOADS = {
                                      11: _burst(35, 120, 90000, 10000, 100000, 20000)},
 }
 
+for _tenancy, _family in SINGLE_TENANCIES.items():
+    for _workload in ("const", "burst"):
+        WORKLOADS[(_tenancy, _workload)] = run_core_sweep.WORKLOADS[(_family, _workload)]
+
 ORDERINGS = {"fcfs": "FCFS", "edf": "EDF", "ap": "ACCUMULATING_PRIORITY"}
 
 # the fixed accounting against the one it replaced
@@ -127,10 +149,30 @@ ACCOUNTINGS = {"ahead": False, "whole": True}
 
 
 def config_names() -> list[str]:
-    return [f"{tenancy}_{workload}_{mult}x_{ordering}_{accounting}"
-            for tenancy, workload, mult, ordering, accounting
-            in itertools.product(TENANCIES, ["const", "burst"], SLO_MULTIPLES,
-                                 ORDERINGS, ACCOUNTINGS)]
+    names = []
+    for tenancy, workload, mult in itertools.product(TENANCIES, ["const", "burst"],
+                                                     SLO_MULTIPLES):
+        # a single workflow orders identically under every ordering, and is only
+        # run under the current accounting
+        single = tenancy in SINGLE_TENANCIES
+        orderings = ["fcfs"] if single else ORDERINGS
+        accountings = ["ahead"] if single else ACCOUNTINGS
+        if not _feasible(tenancy, workload, mult):
+            continue
+        names += [f"{tenancy}_{workload}_{mult}x_{ordering}_{accounting}"
+                  for ordering, accounting in itertools.product(orderings, accountings)]
+    return names
+
+
+def _feasible(tenancy: str, workload: str, mult: int) -> bool:
+    """Whether every tenant's SLO at [mult] exceeds its own job size. Only a tenant
+    held to another workflow's SLO (run_core_sweep.SLO_FROM) can fall short.
+    """
+    if tenancy not in SINGLE_TENANCIES:
+        return True
+    family = SINGLE_TENANCIES[tenancy]
+    return all(slo > run_core_sweep.job_runtime(family, wid)
+               for wid, slo in _job_slos(tenancy, workload, mult).items())
 
 
 def _parse(config_name: str) -> tuple[str, str, int, str, str]:
@@ -147,6 +189,14 @@ def _job_slos(tenancy: str, workload: str, mult: int) -> dict[int, int]:
     carry the slowest pipeline's deadline.
     """
     workflow_ids = list(WORKLOADS[(tenancy, workload)])
+
+    if tenancy in SINGLE_TENANCIES:
+        # the core sweep's job size, or that of the workflow whose SLO it shares:
+        # WF14 is held to WF12's deadline at every multiple
+        family = SINGLE_TENANCIES[tenancy]
+        return {wid: int(run_core_sweep.job_runtime(
+                    *run_core_sweep.SLO_FROM.get(family, (family, wid))) * mult)
+                for wid in workflow_ids}
 
     if EQUALIZE_SLOS:
         slo = int(max(JOB_SIZES[wid] for wid in workflow_ids) * mult)
@@ -203,6 +253,22 @@ def run_one(config_name: str, out_path: str):
     with open(os.path.join(out_path, "overrides.json"), "w") as f:
         json.dump({"config": config_name, "scheduler_type": "central",
                    "overrides": overrides}, f, indent=2)
+
+    _record_overrides(out_path, config_name, overrides)
+
+
+def _record_overrides(out_path: str, config_name: str, overrides: dict):
+    """Appends [overrides] to the run's config snapshot, which run_experiment
+    copies before the run, so that later assignments win and the snapshot is a
+    faithful record. plot_tail reads CUSTOM_ALLOCATION back out of it to size each
+    workflow's jobs.
+    """
+    with open(os.path.join(out_path, "configs", "gen_config.py"), "a") as f:
+        f.write(f"\n\n\"\"\" ----- overrides applied by run_lookahead_sweep.py "
+                f"({config_name}) ----- \"\"\"\n\n")
+        for option, value in overrides.items():
+            literal = f'"{value}"' if isinstance(value, str) else repr(value)
+            f.write(f"{option} = {literal}\n")
 
 
 def run_sweep(config_names: list[str], out_dir: str, max_parallel: int):

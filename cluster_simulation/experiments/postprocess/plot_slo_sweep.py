@@ -23,7 +23,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # tenancies run_lookahead_sweep.py names its configurations after, in plot order
-TENANCIES = ["ppl2", "textvision", "textvisionswapped"]
+TENANCIES = ["ppl2", "textvision", "textvisionswapped",
+             "wf1", "wf6", "wf12", "wf13", "wf14"]
+
+# single-tenant tenancies whose SLO multiples are of another workflow's job size,
+# as run_core_sweep.SLO_FROM sets them
+SLO_FROM_LABELS = {"wf14": "WF12's deadlines"}
 
 # categorical slots 1 and 2, carrying the comparison itself
 SERIES = [("ahead", "LOOKAHEAD (ahead only)", "#2a78d6"),
@@ -96,6 +101,10 @@ def plot_slo_sweep(src: str, multiples: list[int], ordering: str, out_path: str)
                 xs.append(mult)
                 ys.append(_miss_rate(jobs[(tenancy, workload, mult, key)], wid))
 
+            # a series the sweep did not run is left out of the legend too
+            if not xs:
+                continue
+
             ax.plot(xs, ys, label=label, color=color, linewidth=2,
                     marker="o", markersize=8, markeredgecolor=SURFACE,
                     markeredgewidth=2)
@@ -108,8 +117,11 @@ def plot_slo_sweep(src: str, multiples: list[int], ordering: str, out_path: str)
         for side in ("left", "bottom"):
             ax.spines[side].set_color(GRID)
         ax.tick_params(colors=INK_SECONDARY, labelsize=9)
-        ax.set_title(f"WF{wid} ({tenancy}), {workload}", color=INK, fontsize=11,
-                     loc="left")
+        # a single-tenant tenancy is named after its workflow, so only say which
+        # tenancy a panel is from when it is shared, or held to another's SLO
+        note = SLO_FROM_LABELS.get(tenancy) or (tenancy if tenancy != f"wf{wid}" else None)
+        ax.set_title(f"WF{wid}" + (f" ({note})" if note else "") + f", {workload}",
+                     color=INK, fontsize=11, loc="left")
 
     axes[0][0].set_ylim(0, None)
     axes[0][0].legend(frameon=False, fontsize=9, labelcolor=INK_SECONDARY)

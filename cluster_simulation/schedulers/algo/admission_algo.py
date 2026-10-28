@@ -194,6 +194,12 @@ class AdmissionController:
         # bucket key -> bucket, TOKEN_BUCKET only
         self.buckets: dict = {}
 
+        # one (time, bucket key, key, job ID, tokens available, admitted, tokens
+        # left) per bucket decision, TOKEN_BUCKET only. Between decisions a bucket
+        # only refills at its rate up to its depth, so these pin its level at
+        # every point in the run
+        self.token_history: list[tuple] = []
+
         if gcfg.ADMISSION_CONTROL_POLICY == "TOKEN_BUCKET":
             assert(workflows is not None and workers is not None), \
                 "TOKEN_BUCKET admission control needs the workflows and workers to " \
@@ -204,8 +210,10 @@ class AdmissionController:
                 self._build_buckets(workflows, workers, start_time)
 
     def _check_bucket_config(self):
-        assert(0 < gcfg.ADMISSION_TARGET_UTILIZATION <= 1), \
-            "ADMISSION_TARGET_UTILIZATION must be in (0, 1], got " \
+        # above 1 admits faster than the capacity estimate, which is allowed: the
+        # estimate is only an estimate, and sweeps probe past it
+        assert(gcfg.ADMISSION_TARGET_UTILIZATION > 0), \
+            "ADMISSION_TARGET_UTILIZATION must be positive, got " \
             f"{gcfg.ADMISSION_TARGET_UTILIZATION}"
         assert(gcfg.ADMISSION_BURST_SIZE is None or gcfg.ADMISSION_BURST_SIZE >= 1), \
             f"ADMISSION_BURST_SIZE must admit at least one job, got {gcfg.ADMISSION_BURST_SIZE}"
@@ -393,10 +401,29 @@ class AdmissionController:
             f"No admission bucket for stage {task.task_id} of workflow " \
             f"{task.job.job_type_id}"
 
-        reject = not self.buckets[self.bucket_keys[key]].try_consume(time)
+        reject = not self._try_consume(time, key, task.job.id)
         self._count(key, reject)
 
         return reject
+
+    def _try_consume(self, time: float, key, job_id: int) -> bool:
+        """Spends a token of the bucket [key] draws on, on behalf of [job_id], and
+        records the bucket's level around the decision in [self.token_history].
+
+        Returns:
+            consumed: True if a token was available and has been spent
+        """
+        bucket_key = self.bucket_keys[key]
+        bucket = self.buckets[bucket_key]
+
+        consumed = bucket.try_consume(time)
+        # the bucket refills before deciding, so its level before the decision is
+        # what is left plus whatever was just spent
+        self.token_history.append((time, bucket_key, key, job_id,
+                                   bucket.tokens + (1 if consumed else 0),
+                                   consumed, bucket.tokens))
+
+        return consumed
 
     def _count(self, key, reject: bool):
         counter = self.rejected if reject else self.admitted
@@ -419,7 +446,7 @@ class AdmissionController:
         if gcfg.ADMISSION_CONTROL_POLICY == "TOKEN_BUCKET":
             assert(job.job_type_id in self.bucket_keys), \
                 f"No admission bucket for workflow {job.job_type_id}"
-            return not self.buckets[self.bucket_keys[job.job_type_id]].try_consume(time)
+            return not self._try_consume(time, job.job_type_id, job.id)
 
         rate = gcfg.ADMISSION_DROP_RATE
         assert(0 <= rate <= 1), f"ADMISSION_DROP_RATE must be in [0, 1], got {rate}"
@@ -478,3 +505,29 @@ class AdmissionController:
             })
 
         return stats
+
+    def get_token_log(self) -> list[dict]:
+        """Returns every token bucket decision, for the run's token_bucket_log.csv:
+        the bucket's level at the decision (after refilling), whether a token was
+        spent, and the level it was left at. Empty unless the policy is
+        TOKEN_BUCKET.
+
+        The bucket label matches admission_control.csv. Under AGGREGATE scope the
+        workflow and task say which tenant drew on the shared bucket.
+        """
+        rows = []
+        for time, bucket_key, key, job_id, available, consumed, left in self.token_history:
+            wid, task_id = key if self.per_task else (key, np.nan)
+            rows.append({
+                "time": time,
+                "bucket": self._bucket_label(bucket_key),
+                "workflow_id": wid,
+                "task_id": task_id,
+                "job_id": job_id,
+                "tokens_available": available,
+                "admitted": consumed,
+                "tokens_left": left,
+                "depth": self.buckets[bucket_key].depth,
+            })
+
+        return rows
