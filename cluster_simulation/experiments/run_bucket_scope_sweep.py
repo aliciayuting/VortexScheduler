@@ -48,6 +48,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 SIM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXP_DIR = os.path.join(SIM_DIR, "experiments")
@@ -228,11 +229,18 @@ def run_sweep(config_names: list[str], out_dir: str, max_parallel: int,
     pending = list(config_names)
 
     def reap(block: bool):
-        for entry in list(running):
+        """Collects every run that has finished. With [block], first waits until at
+        least one has, so a free slot is refilled as soon as any run ends rather
+        than once the whole set running alongside it is done.
+        """
+        finished = [entry for entry in running if entry[1].poll() is not None]
+        while block and not finished:
+            time.sleep(1)
+            finished = [entry for entry in running if entry[1].poll() is not None]
+
+        for entry in finished:
             name, proc, log = entry
-            if not block and proc.poll() is None:
-                continue
-            code = proc.wait()
+            code = proc.returncode
             log.close()
             running.remove(entry)
             if code == 0:

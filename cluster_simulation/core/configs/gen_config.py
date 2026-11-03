@@ -77,6 +77,19 @@ CLIENT_CONFIGS = [
     #                               {"KIND": "CONSTANT", "RATE": 32, "DURATION": 105000}]},
     #       "SLO": int(45.1 * 5)}},
 
+    # WF15 (WF14 with its 3 rounds of images arriving 600 ms apart)
+    # {15: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 52, "NUM_JOBS": 20000}]},
+    #       "SLO": 2000}},
+
+    # WF15 (WF14 with its 3 rounds of images arriving 600 ms apart) with spikes
+    # {15: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
+    #                    "PHASES": [{"KIND": "BURST", "RATE": 40, "BURST_RATE": 100,
+    #                                "QUIET_DURATION": 50000, "BURST_DURATION": 10000,
+    #                                "STOCHASTIC": False, "DURATION": 360000},
+    #                               {"KIND": "CONSTANT", "RATE": 40, "DURATION": 50000}]},
+    #       "SLO": 2000}},
+
     # WF13 (dairy cow teat health detection)
     # {13: {"WORKLOAD": {"ARRIVAL_PROCESS": "POISSON",
     #                    "PHASES": [{"KIND": "CONSTANT", "RATE": 122, "NUM_JOBS": 20000}]},

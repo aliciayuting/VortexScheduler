@@ -33,9 +33,16 @@ FAMILIES = [("ppl2", "WF1 (pipeline 2)"), ("wf6", "WF6 (textvision)"),
 # runs missing for a scale (0.125x exists only for WF6) are skipped
 SCALES = [0.125, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
-# right edge of each family's tail plot, in multiples of job size. WF14's SLO is
-# only 1.45x its job size (it shares WF12's), so its tail sits well left of 10x
-TAIL_XMAX = {"wf14": 4}
+# families whose tails subtract the arrival delay and normalize by cumulative
+# stage runtime (plot_tail.py --minus-delay) rather than by job size. WF14's last
+# round of images arrives 140 ms after the job, which would otherwise dwarf the
+# 15.7 ms its stages take to run
+MINUS_DELAY = {"wf14"}
+
+# right edge of each family's tail plot, in multiples of job size (or of
+# cumulative stage runtime, for MINUS_DELAY families). WF14's SLO (WF12's) is 5.4x
+# its stage runtime after the delay, and its tails run out to about 15x
+TAIL_XMAX = {"wf14": 20}
 
 # categorical slots 1 and 2, as in plot_slo_sweep.py
 SERIES = [("const", "constant", "#2a78d6"), ("burst", "bursty", "#eb6834")]
@@ -181,8 +188,9 @@ def plot_tails(src: str, fig_dir: str):
                 continue
             subprocess.run(
                 [sys.executable, plot_tail, "--pdf", "--normalize",
-                 "--xmax", str(TAIL_XMAX.get(family, 10)),
-                 "--srcs"] + [r for _, r in runs]
+                 "--xmax", str(TAIL_XMAX.get(family, 10))]
+                + (["--minus-delay"] if family in MINUS_DELAY else [])
+                + ["--srcs"] + [r for _, r in runs]
                 + ["--labels"] + [f"bucket {s:g}×" for s, _ in runs]
                 + ["--groups"] + ["bucket size"] * len(runs)
                 + ["--out", os.path.join(fig_dir, f"{family}_{workload}_tail.png")],

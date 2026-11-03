@@ -29,6 +29,7 @@ import math
 import os
 import subprocess
 import sys
+import time
 
 SIM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXP_DIR = os.path.join(SIM_DIR, "experiments")
@@ -69,6 +70,11 @@ ALLOCATIONS = {
              (6, [17]), (6, [17]), (6, [17]), (6, [17, 19]),
              (6, [18]), (6, [18]), (6, [18]), (6, [18]),
              (6, [18]), (6, [18]), (6, [18]), (6, [18])],
+    # WF15: WF14 with its rounds arriving 600 ms apart, on WF14's placement
+    "wf15": [(6, [17]), (6, [17]), (6, [17]), (6, [17]),
+             (6, [17]), (6, [17]), (6, [17]), (6, [17, 19]),
+             (6, [18]), (6, [18]), (6, [18]), (6, [18]),
+             (6, [18]), (6, [18]), (6, [18]), (6, [18])],
     # WF13: the Vortex planner's placement on 8 GPUs
     "wf13": [(12, [21]), (12, [21]), (12, [21]), (12, [21]), (12, [21, 24]),
              (12, [22]), (12, [22]), (12, [22]), (12, [22]),
@@ -92,7 +98,8 @@ ALLOCATIONS = {
 }
 
 # the workflows sharing the cluster in each family
-FAMILIES = {"wf12": [12], "wf13": [13], "wf14": [14], "wf6": [6], "wf6variants": [6, 7, 8],
+FAMILIES = {"wf12": [12], "wf13": [13], "wf14": [14], "wf15": [15], "wf6": [6],
+            "wf6variants": [6, 7, 8],
             "ppl2": [1], "ppl2mt": [1, 4, 5]}
 
 # Each tenant's job SLO is this many times its own job runtime
@@ -103,6 +110,10 @@ SLO_MULTIPLES = {"wf12": 5, "wf13": 5,
 # take it from. WF14 runs WF12's detections with the images arriving over time, and
 # keeps WF12's deadline so the two differ only in when the input arrives
 SLO_FROM = {"wf14": ("wf12", 12)}
+
+# families held to a fixed job SLO (ms) instead. WF15's rounds span 1200 ms, which
+# leaves it no multiple of its job runtime comparable to the other families'
+FIXED_SLOS = {"wf15": 2000}
 
 
 def _const(rate: int, num_jobs: int) -> dict:
@@ -129,6 +140,11 @@ WORKLOADS = {
     ("wf12", "burst"): {12: _burst(32, 80, 40000, 10000, 400000, 105000)},
     ("wf14", "const"): {14: _const(38, 20000)},
     ("wf14", "burst"): {14: _burst(32, 80, 40000, 10000, 400000, 105000)},
+    # WF15's estimated capacity is 53.5 qps (both detectors' instances, 24 tasks a
+    # job each). Its spikes run at nearly twice that, but the burst phase averages
+    # 50 qps and each spike's backlog drains within the quiet stretch after it
+    ("wf15", "const"): {15: _const(52, 20000)},
+    ("wf15", "burst"): {15: _burst(40, 100, 50000, 10000, 360000, 50000)},
     ("wf13", "const"): {13: _const(122, 20000)},
     ("wf13", "burst"): {13: _burst(80, 200, 30000, 10000, 160000, 40000)},
 
@@ -228,8 +244,11 @@ def job_runtime(family: str, workflow_id: int) -> float:
 
 def job_slo(family: str, workflow_id: int) -> int:
     """Returns the job SLO (ms) [workflow_id] is given in [family]: SLO_MULTIPLES
-    times its own job runtime, or the SLO of the workflow SLO_FROM names.
+    times its own job runtime, the SLO of the workflow SLO_FROM names, or the one
+    FIXED_SLOS sets.
     """
+    if family in FIXED_SLOS:
+        return FIXED_SLOS[family]
     family, workflow_id = SLO_FROM.get(family, (family, workflow_id))
     return int(job_runtime(family, workflow_id) * SLO_MULTIPLES[family])
 
@@ -372,11 +391,18 @@ def _run_all(config_names: list[str], out_dir: str, max_parallel: int,
     pending = list(config_names)
 
     def reap(block: bool):
-        for entry in list(running):
+        """Collects every run that has finished. With [block], first waits until at
+        least one has, so a free slot is refilled as soon as any run ends rather
+        than once the whole set running alongside it is done.
+        """
+        finished = [entry for entry in running if entry[1].poll() is not None]
+        while block and not finished:
+            time.sleep(1)
+            finished = [entry for entry in running if entry[1].poll() is not None]
+
+        for entry in finished:
             name, proc, log = entry
-            if not block and proc.poll() is None:
-                continue
-            code = proc.wait()
+            code = proc.returncode
             log.close()
             running.remove(entry)
             if code == 0:

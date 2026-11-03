@@ -44,6 +44,80 @@ def scheduler_manages_queues() -> bool:
                      "whether queues are managed at the scheduler or at the workers")
 
 
+class _RemainingWork:
+    """What the remaining time walks need to know about a job's incomplete tasks,
+    valid until the job completes another task.
+
+    Every sweep tests every queued task, and a job keeps the same remaining work
+    across the many sweeps it spends queued, so walking its DAG afresh each time
+    dominates a run whose queues are long. Each field is filled the first time a
+    policy asks for it.
+    """
+
+    def __init__(self, version: int):
+        # the job's [num_completed_tasks] when this was computed
+        self.version = version
+        # [get_remaining_processing_time] under job-level SLOs
+        self.processing_time: float | None = None
+        # the incomplete tasks in the order the walks charge them: each wave holds
+        # the tasks whose dependencies are complete or in an earlier wave, as
+        # (task IDs, model ID -> (model data, number of the wave's tasks on it))
+        self.waves: list[tuple[set[int], dict[int, tuple]]] | None = None
+
+
+def _remaining_work(job) -> _RemainingWork:
+    cache = job.remaining_work_cache
+    if cache is None or cache.version != job.num_completed_tasks:
+        cache = job.remaining_work_cache = _RemainingWork(job.num_completed_tasks)
+    return cache
+
+
+def _complete_task_ids(job) -> set[int]:
+    return {tid for tid, t in job._task_states.items() if t >= 0}
+
+
+def _get_remaining_waves(job) -> list[tuple[set[int], dict[int, tuple]]]:
+    """Returns [job]'s incomplete tasks grouped into waves (see
+    [_RemainingWork.waves]), walking its DAG only when it has changed since the
+    last call.
+    """
+    work = _remaining_work(job)
+    if work.waves is not None:
+        return work.waves
+
+    complete_task_ids = _complete_task_ids(job)
+
+    dependencies: dict[int, set[int]] = {}
+    dependents: dict[int, set[int]] = {}
+    available = []
+    for t in job.tasks:
+        dependencies[t.task_id] = set(t.required_task_ids) - complete_task_ids
+        dependents[t.task_id] = set(t.next_task_ids) - complete_task_ids
+
+        if t.task_id not in complete_task_ids and not dependencies[t.task_id]:
+            available.append(t)
+
+    waves = []
+    while available:
+        models: dict[int, tuple] = {}
+        for t in available:
+            model_data, count = models.get(t.model_data.id, (t.model_data, 0))
+            models[t.model_data.id] = (model_data, count + 1)
+        waves.append(({t.task_id for t in available}, models))
+
+        next_available = []
+        for t in available:
+            for dep in dependents[t.task_id]:
+                dependencies[dep].discard(t.task_id)
+                if not dependencies[dep]:
+                    next_available.append(job.get_task_by_id(dep))
+
+        available = next_available
+
+    work.waves = waves
+    return waves
+
+
 def get_remaining_processing_time(task: Task, worker_size: int | None = None) -> float:
     """Returns the minimum time still needed before [task]'s deadline can be met.
 
@@ -66,8 +140,12 @@ def get_remaining_processing_time(task: Task, worker_size: int | None = None) ->
 
         return get_min_exec_time(task.model_data)
 
-    complete_task_ids = {tid for tid, t in task.job._task_states.items() if t >= 0}
-    return _get_processing_time(task.job, complete_task_ids)
+    # the same for every task of the job until it completes another one
+    work = _remaining_work(task.job)
+    if work.processing_time is None:
+        work.processing_time = _get_processing_time(task.job,
+                                                    _complete_task_ids(task.job))
+    return work.processing_time
 
 
 def get_remaining_time_with_queueing(time: float, task: Task, load_view,
@@ -120,38 +198,25 @@ def get_remaining_time_with_queueing(time: float, task: Task, load_view,
         return (load_view.get_queue_delay(task.model_data.id, time, priority)
                 + _exec_time(task.model_data, True))
 
-    job = task.job
-    complete_task_ids = {tid for tid, t in job._task_states.items() if t >= 0}
-
-    dependencies: dict[int, set[int]] = {}
-    dependents: dict[int, set[int]] = {}
-    available = []
-    for t in job.tasks:
-        dependencies[t.task_id] = set(t.required_task_ids) - complete_task_ids
-        dependents[t.task_id] = set(t.next_task_ids) - complete_task_ids
-
-        if t.task_id not in complete_task_ids and not dependencies[t.task_id]:
-            available.append(t)
-
     remaining = 0.0
-    while available:
+    for task_ids, models in _get_remaining_waves(task.job):
         # every stage in this wave waits out its own model's backlog, and the wave
-        # is not done until its slowest stage is
-        remaining += max(
-            load_view.get_queue_delay(
-                t.model_data.id, time,
-                priority if t.task_id == task.task_id else None)
-            + _exec_time(t.model_data, t.task_id == task.task_id)
-            for t in available)
+        # is not done until its slowest stage is. Stages on the same model wait out
+        # the same backlog, so each model is charged once, except that [task] is
+        # charged for its own place in line
+        in_wave = task.task_id in task_ids
+        delays = []
+        for model_id, (model_data, count) in models.items():
+            if in_wave and model_id == task.model_data.id:
+                delays.append(load_view.get_queue_delay(model_id, time, priority)
+                              + _exec_time(task.model_data, True))
+                if count == 1:
+                    continue
 
-        next_available = []
-        for t in available:
-            for dep in dependents[t.task_id]:
-                dependencies[dep].discard(t.task_id)
-                if not dependencies[dep]:
-                    next_available.append(job.get_task_by_id(dep))
+            delays.append(load_view.get_queue_delay(model_id, time)
+                          + _exec_time(model_data, False))
 
-        available = next_available
+        remaining += max(delays)
 
     return remaining
 
@@ -219,6 +284,18 @@ def needs_load_view(policy: str) -> bool:
     return policy in _LOAD_AWARE_POLICIES
 
 
+def _decides_per_job(policy: str) -> bool:
+    """Whether [policy] reaches the same verdict for every task of a job at one
+    instant, so that a sweep need only test each job once.
+
+    Under job-level SLOs, LAZY and EARLY hold the job's own deadline against work
+    that does not depend on which of its tasks asks. LOOKAHEAD charges each task
+    for its own place in line, and per-stage SLOs give each stage its own
+    deadline, so neither can be decided once for the whole job.
+    """
+    return gcfg.SLO_TYPE == "JOB_LEVEL" and policy in ("LAZY", "EARLY")
+
+
 def should_drop_task(time: float, task: Task, worker_size: int | None = None,
                      load_view=None, priority: float | None = None) -> bool:
     """Whether the job owning [task] should be dropped at [time] under DROP_POLICY,
@@ -265,6 +342,10 @@ def drop_from_queue(time: float, task_queue: PriorityQueue,
 
     kept = []
     newly_dropped: list[int] = []
+    # jobs already kept by this sweep, whose other tasks need no second test when
+    # the verdict is the same for all of them
+    per_job = _decides_per_job(gcfg.DROP_POLICY)
+    kept_job_ids: set[int] = set()
 
     while task_queue.qsize() > 0:
         qt = task_queue.get()
@@ -273,11 +354,17 @@ def drop_from_queue(time: float, task_queue: PriorityQueue,
         if job.id in already_dropped or job.id in newly_dropped:
             continue
 
+        if job.id in kept_job_ids:
+            kept.append(qt)
+            continue
+
         if should_drop_task(time, qt.task, worker_size, load_view, qt.priority):
             newly_dropped.append(job.id)
             continue
 
         kept.append(qt)
+        if per_job:
+            kept_job_ids.add(job.id)
 
     for qt in kept:
         task_queue.put(qt)
@@ -314,15 +401,22 @@ def shadow_drops_from_queue(time: float, task_queue: PriorityQueue,
 
     seen_here: set[int] = set()
     newly_shadow_dropped: list[tuple[int, int]] = []
+    # jobs this scan found would be kept, skipped thereafter when the verdict is
+    # the same for every task of a job
+    per_job = _decides_per_job(gcfg.SHADOW_DROP_POLICY)
+    kept_job_ids: set[int] = set()
 
     for qt in list(task_queue.queue):
         job_id = qt.task.job.id
-        if job_id in already_shadow_dropped or job_id in seen_here:
+        if job_id in already_shadow_dropped or job_id in seen_here \
+                or job_id in kept_job_ids:
             continue
 
         if should_shadow_drop_task(time, qt.task, worker_size, load_view,
                                    qt.priority):
             seen_here.add(job_id)
             newly_shadow_dropped.append((job_id, qt.task.task_id))
+        elif per_job:
+            kept_job_ids.add(job_id)
 
     return newly_shadow_dropped

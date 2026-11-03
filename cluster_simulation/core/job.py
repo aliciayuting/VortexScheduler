@@ -18,7 +18,13 @@ class Job(object):
 
         # task ID -> completion time, -1 for not complete
         self._task_states: dict[Task, float] = {tid: -1 for tid in workflow.tasks.keys()}
-        
+
+        # tasks only ever go from incomplete to complete, so this count versions the
+        # job's remaining work: estimates of it can be cached until it changes
+        self.num_completed_tasks: int = 0
+        # drop_algo's cache of that remaining work, keyed on [num_completed_tasks]
+        self.remaining_work_cache = None
+
         self.create_time = created_at
         self.slo: float = slo
 
@@ -104,6 +110,7 @@ class Job(object):
     def set_completion_time(self, time: float, task_id: int):
         assert(self._task_states[task_id] < 0)
         self._task_states[task_id] = time
+        self.num_completed_tasks += 1
     
     def newly_available_tasks(self, dependency: Task) -> list[Task]:
         """Fetches a list of incomplete dependents of a given task for which the

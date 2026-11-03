@@ -26,6 +26,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 SIM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXP_DIR = os.path.join(SIM_DIR, "experiments")
@@ -118,16 +119,23 @@ def run_sweep(names: list[str], out_dir: str, max_parallel: int) -> list[str]:
             running.append((name, proc, log))
             print(f"[start] {name} -> {run_path}", flush=True)
 
-        # wait for the oldest run, then refill
-        name, proc, log = running.pop(0)
-        code = proc.wait()
-        log.close()
-        if code == 0:
-            print(f"[done] {name}", flush=True)
-        else:
-            failed.append(name)
-            print(f"[FAILED] {name} (exit {code}), see "
-                  f"{os.path.join(out_dir, name, 'run.log')}", flush=True)
+        # wait for any run to finish, then refill, so one slow run does not hold
+        # up the slots the others free
+        finished = [entry for entry in running if entry[1].poll() is not None]
+        while not finished:
+            time.sleep(1)
+            finished = [entry for entry in running if entry[1].poll() is not None]
+
+        for entry in finished:
+            running.remove(entry)
+            name, proc, log = entry
+            log.close()
+            if proc.returncode == 0:
+                print(f"[done] {name}", flush=True)
+            else:
+                failed.append(name)
+                print(f"[FAILED] {name} (exit {proc.returncode}), see "
+                      f"{os.path.join(out_dir, name, 'run.log')}", flush=True)
 
     return failed
 

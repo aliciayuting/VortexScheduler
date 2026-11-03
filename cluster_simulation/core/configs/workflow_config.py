@@ -53,18 +53,18 @@ def _build_object_defect_tasks():
     return detector_tasks
 
 
-def _build_time_series_defect_tasks():
+def _build_time_series_defect_tasks(round_interval_ms: int = 70):
     """Build the time-series variant of the defect-inspection DAG.
 
     Same 3 rounds x 8 cameras x 2 YOLOv5 detectors as
     [_build_object_defect_tasks], but the rounds are captured over time rather
-    than run in sequence: round r's 8 images arrive ARRIVAL_OFFSET = 70 * (r - 1)
-    ms after the job is created, and no detection depends on another. Only the
-    final aggregation waits, on all 48 detection results.
+    than run in sequence: round r's 8 images arrive ARRIVAL_OFFSET =
+    [round_interval_ms] * (r - 1) ms after the job is created, and no detection
+    depends on another. Only the final aggregation waits, on all 48 detection
+    results.
     """
     image_size_kb = 1000
     detection_result_size_kb = 10
-    round_interval_ms = 70
     aggregate_task_index = 3 * 8 * 2
     detector_tasks = []
 
@@ -612,6 +612,12 @@ WORKFLOW_LIST = [
      "DESCRIPTION": ("3 rounds x 8 cameras x 2 YOLOv5 detectors, rounds arriving 70 ms "
                      "apart and inspected independently; aggregate 48 results from 24 images"),
      "TASKS": _build_time_series_defect_tasks(),
+    },
+    {"JOB_TYPE": 15,     # WF14 with its 3 rounds of images arriving 600 ms apart
+     "JOB_NAME": "time_series_defect_inspection_600ms",
+     "DESCRIPTION": ("3 rounds x 8 cameras x 2 YOLOv5 detectors, rounds arriving 600 ms "
+                     "apart and inspected independently; aggregate 48 results from 24 images"),
+     "TASKS": _build_time_series_defect_tasks(round_interval_ms=600),
     },
 ]
 

@@ -69,6 +69,11 @@ def _get_model_placements(cfg_dir: str) -> tuple[dict[int, int], dict[int, set[i
 
 
 def get_workflow_job_sizes(src: str) -> dict[int, float]:
+    """Returns each workflow's job size; see [get_workflow_critical_paths]."""
+    return {wf: size for wf, (size, _) in get_workflow_critical_paths(src).items()}
+
+
+def get_workflow_critical_paths(src: str) -> dict[int, tuple[float, float]]:
     """Returns each workflow's job size, i.e. how long one job takes with the
     cluster to itself: the longest path through the DAG at batch size 1, with each
     stage charged for the rounds its own job forces it into and run at the speed of
@@ -81,6 +86,11 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
     tasks on a model than there are instances -- every stage of the textvision and
     ppl2 workflows, and most others -- this is exactly the critical path.
 
+    Also returns the cumulative stage runtime along that path: the time its tasks
+    spend executing, leaving out the time a source task waits for an input that
+    arrives ARRIVAL_OFFSET ms after the job is created. The difference between the
+    two is the job's arrival delay, which no scheduler can recover.
+
     Read from the config snapshot in the results directory rather than hardcoded,
     so a plot always reflects the configuration that run actually used.
 
@@ -88,7 +98,7 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
         src: Results directory for one run
 
     Returns:
-        job_sizes: Workflow ID -> job size (ms)
+        critical_paths: Workflow ID -> (job size, cumulative stage runtime) (ms)
     """
     cfg_dir = _find_config_dir(src)
     wcfg = _load_config(os.path.join(cfg_dir, "workflow_config.py"))
@@ -105,7 +115,7 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
         exec_times[i] = max(times[size][1]
                             for size in partition_sizes.get(i, {max(times)}))
 
-    job_sizes = {}
+    critical_paths = {}
     for cfg in wcfg.WORKFLOW_LIST:
         tasks = {t["TASK_INDEX"]: t for t in cfg["TASKS"]}
 
@@ -137,6 +147,8 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
         # cannot start until every predecessor is done, hence max over predecessors,
         # nor a source task before its input arrives.
         finish_by: dict[int, float] = {}
+        # execution time along the path that determines each task's finish
+        busy_by: dict[int, float] = {}
         ready = [t for t in tasks.values() if not t["PREV_TASK_INDEX"]]
         while ready:
             next_ready = []
@@ -147,9 +159,14 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
 
                 start = max([finish_by[p] for p in task["PREV_TASK_INDEX"]],
                             default=task.get("ARRIVAL_OFFSET", 0))
-                finish_by[tid] = start + (exec_times[task["MODEL_ID"]]
-                                          * rounds[stage(tid)]
-                                          if task["MODEL_ID"] >= 0 else 0)
+                # of the predecessors finishing last, the one that spent longest
+                # executing, so that a tie is not charged as delay
+                busy_before = max([busy_by[p] for p in task["PREV_TASK_INDEX"]
+                                   if finish_by[p] == start], default=0)
+                runtime = (exec_times[task["MODEL_ID"]] * rounds[stage(tid)]
+                           if task["MODEL_ID"] >= 0 else 0)
+                finish_by[tid] = start + runtime
+                busy_by[tid] = busy_before + runtime
 
                 next_ready.extend([
                     tasks[n] for n in task["NEXT_TASK_INDEX"]
@@ -159,11 +176,14 @@ def get_workflow_job_sizes(src: str) -> dict[int, float]:
             ready = next_ready
 
         assert(len(finish_by) == len(tasks))
-        job_sizes[cfg["JOB_TYPE"]] = max(finish_by.values())
+        job_size = max(finish_by.values())
+        critical_paths[cfg["JOB_TYPE"]] = (job_size, max(busy_by[t] for t in finish_by
+                                                         if finish_by[t] == job_size))
 
-    return job_sizes
+    return critical_paths
 
-def _load_source(src: str, need_job_sizes: bool) -> tuple[pd.DataFrame, dict[int, float]]:
+def _load_source(src: str,
+                 need_job_sizes: bool) -> tuple[pd.DataFrame, dict[int, tuple[float, float]]]:
     """Loads one run's per job response times.
 
     Jobs that never completed, whether dropped mid-flight or rejected on arrival by
@@ -172,12 +192,13 @@ def _load_source(src: str, need_job_sizes: bool) -> tuple[pd.DataFrame, dict[int
 
     Args:
         src: Results directory for one run
-        need_job_sizes: Whether to also read the run's per workflow job sizes,
-        which requires the config snapshot to be present
+        need_job_sizes: Whether to also read the run's per workflow critical
+        paths, which requires the config snapshot to be present
 
     Returns:
         data: Per job response times, with a workflow_id column
-        job_sizes: Workflow ID -> job size (ms), or None if not requested
+        critical_paths: Workflow ID -> (job size, cumulative stage runtime) (ms),
+        or None if not requested
     """
     if os.path.exists(os.path.join(src, "job_breakdown.csv")):
         data = pd.read_csv(os.path.join(src, "job_breakdown.csv"))
@@ -195,7 +216,7 @@ def _load_source(src: str, need_job_sizes: bool) -> tuple[pd.DataFrame, dict[int
         data = pd.read_csv(os.path.join(src, "job_log.csv"))
         data.loc[data["was_completed"]==False, "response_time"] = np.inf
 
-    return data, (get_workflow_job_sizes(src) if need_job_sizes else None)
+    return data, (get_workflow_critical_paths(src) if need_job_sizes else None)
 
 
 def _load_sources(srcs: list[tuple[str, str]],
@@ -203,7 +224,7 @@ def _load_sources(srcs: list[tuple[str, str]],
     """Loads every run to compare.
 
     Returns:
-        loaded_srcs: (name, per job data, job sizes) for each run
+        loaded_srcs: (name, per job data, critical paths) for each run
         max_res: Largest finite response time across all runs (ms), which bounds
         the x axis when response times are plotted in absolute terms
     """
@@ -308,9 +329,11 @@ def _legend(ax, labels: list[str], colors: list, hues: list[str] | None,
 def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: bool,
                                 normalize_by_job_size: bool, save_fig: bool, out_path: str,
                                 max_job_size_multiple: float = 10,
+                                minus_delay: bool = False,
                                 groups: list[str] | None = None,
                                 hues: list[str] | None = None,
-                                styles: list[str] | None = None):
+                                styles: list[str] | None = None,
+                                per_slo: bool = False):
     """Plots the tail CDF of job response time for every run in [srcs].
 
     The two options are independent and may be combined:
@@ -321,6 +344,15 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
     axis. [split_by_workflow] gives each workflow its own subplot instead of
     pooling every job into a single curve.
 
+    [minus_delay], with [normalize_by_job_size], instead subtracts the workflow's
+    arrival delay (the time its critical path waits on inputs arriving after the
+    job is created) from each response time and measures what remains in
+    multiples of the critical path's cumulative stage runtime. A workflow whose
+    inputs all arrive with the job has no delay, and is plotted as without it.
+
+    [per_slo] instead measures each job's response time in multiples of its own
+    job SLO (deadline - create time), so 1 is the deadline whatever the workflow.
+
     Args:
         srcs: (results directory, label) for each run to compare
         split_by_workflow: One subplot per workflow rather than one pooled curve
@@ -329,12 +361,15 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
         out_path: Where to save the figure
         max_job_size_multiple: Right edge of the x axis when normalizing, so that
         runs whose SLO exceeds the default still show their tail
+        minus_delay: Normalize by cumulative stage runtime after subtracting the
+        arrival delay, rather than by job size
         groups: Group name per run, which colours the runs of a group as shades of
         one hue instead of giving each its own (see [_series_colors])
         hues: Colour key per run. Runs sharing a key share a categorical colour,
         and the legend lists each key once. Overrides [groups]
         styles: Dash pattern key per run. Runs sharing a key share a dash pattern,
         and the legend lists each key once
+        per_slo: X axis in multiples of each job's SLO rather than ms or job size
     """
     labels = [name for _, name in srcs]
     if hues is not None:
@@ -345,21 +380,41 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
                   if styles is not None else ["-"] * len(srcs))
     loaded_srcs, max_res = _load_sources(srcs, need_job_sizes=normalize_by_job_size)
 
-    if normalize_by_job_size:
+    assert(normalize_by_job_size or not minus_delay), "minus_delay requires normalizing"
+    assert(not (per_slo and normalize_by_job_size)), "per_slo replaces normalizing"
+
+    if per_slo:
+        thresholds = np.linspace(0, max_job_size_multiple, 250)
+        xlabel = "Response time as multiple of SLO"
+    elif minus_delay:
+        thresholds = np.linspace(0, max_job_size_multiple, 250)
+        xlabel = "Response time as multiple of cumulative stage runtime"
+    elif normalize_by_job_size:
         thresholds = np.linspace(0, max_job_size_multiple, 250)
         xlabel = "Response time as multiple of job size"
     else:
         thresholds = np.arange(0, max_res, 1)
         xlabel = "Response time (ms)"
 
-    def _exceedance_counts(response_times, scale: float) -> np.ndarray:
+    def _exceedance_counts(response_times, scale: tuple[float, float]) -> np.ndarray:
         """Number of jobs whose response time exceeds each threshold. [scale] is
-        the workflow's job size when normalizing, and 1 when plotting raw ms.
+        (unit, offset): a job exceeds threshold t when its response time minus
+        offset exceeds t units.
         """
-        return np.array([(response_times > t * scale).sum() for t in thresholds])
+        unit, offset = scale
+        return np.array([(response_times - offset > t * unit).sum() for t in thresholds])
 
-    def _workflow_scale(job_sizes: dict, wf) -> float:
-        return job_sizes[wf] if normalize_by_job_size else 1.0
+    def _workflow_scale(critical_paths: dict, data: pd.DataFrame, wf) -> tuple[float, float]:
+        if per_slo:
+            jobs = data.loc[data["workflow_id"] == wf]
+            # rounded, since deadline - create time carries float error
+            slos = (jobs["deadline"] - jobs["create_time"]).round(6).unique()
+            assert(len(slos) == 1), f"workflow {wf} has several SLOs in one run: {slos}"
+            return slos[0], 0.0
+        if minus_delay:
+            job_size, stage_runtime = critical_paths[wf]
+            return stage_runtime, job_size - stage_runtime
+        return (critical_paths[wf][0], 0.0) if normalize_by_job_size else (1.0, 0.0)
 
     if split_by_workflow:
         # collect all workflows across all loaded dataframes
@@ -377,11 +432,11 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
             ax.set_yscale("log")
             ax.grid(True, which="both")
 
-        for i, (name, data, job_sizes) in enumerate(loaded_srcs):
+        for i, (name, data, critical_paths) in enumerate(loaded_srcs):
             for wf in sorted(set(data["workflow_id"])):
                 subset = data.loc[data["workflow_id"] == wf, "response_time"].values
 
-                cdf = _exceedance_counts(subset, _workflow_scale(job_sizes, wf)) / len(subset)
+                cdf = _exceedance_counts(subset, _workflow_scale(critical_paths, data, wf)) / len(subset)
                 cdf[cdf == 0] = np.nan
 
                 wf2ax[wf].plot(thresholds, cdf, label=name, color=palette[i],
@@ -397,13 +452,13 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
     else:
         plt.figure(figsize=(8, 6))
 
-        for i, (name, data, job_sizes) in enumerate(loaded_srcs):
+        for i, (name, data, critical_paths) in enumerate(loaded_srcs):
             # every workflow is measured against its own scale, then pooled into
             # one curve over all of the run's jobs
             counts = np.zeros(len(thresholds))
             for wf in sorted(set(data["workflow_id"])):
                 subset = data.loc[data["workflow_id"] == wf, "response_time"].values
-                counts += _exceedance_counts(subset, _workflow_scale(job_sizes, wf))
+                counts += _exceedance_counts(subset, _workflow_scale(critical_paths, data, wf))
 
             cdf = counts / len(data)
             cdf[cdf == 0] = np.nan
@@ -455,6 +510,15 @@ if __name__ == "__main__":
                         help="Normalize response time to a multiple of job size (the "
                              "workflow's critical path at batch size 1) instead of "
                              "plotting it in absolute ms. May be combined with --split")
+    parser.add_argument("--minus-delay", action="store_true",
+                        help="With --normalize, subtract each workflow's arrival delay "
+                             "(the time its critical path waits on inputs arriving "
+                             "after the job is created) from response time, and "
+                             "normalize by the critical path's cumulative stage "
+                             "runtime instead of job size")
+    parser.add_argument("--per-slo", action="store_true",
+                        help="Plot response time as a multiple of each job's SLO "
+                             "instead of in ms. --xmax is then in multiples of SLO")
 
     args = parser.parse_args()
 
@@ -469,4 +533,5 @@ if __name__ == "__main__":
         out_path = "tail_by_workflow.pdf" if args.split else "tail_agg.pdf"
 
     plot_response_time_tail_cdf(srcs, args.split, args.normalize, args.pdf, out_path,
-                                args.xmax, args.groups, args.hues, args.styles)
+                                args.xmax, args.minus_delay, args.groups, args.hues,
+                                args.styles, args.per_slo)

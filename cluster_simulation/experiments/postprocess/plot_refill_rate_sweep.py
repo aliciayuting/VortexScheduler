@@ -26,8 +26,8 @@ import sys
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from plot_bucket_size_sweep import (FAMILIES, SERIES, TAIL_XMAX, INK_SECONDARY,
-                                    SURFACE, _style)
+from plot_bucket_size_sweep import (FAMILIES, SERIES, TAIL_XMAX, MINUS_DELAY,
+                                    INK_SECONDARY, SURFACE, _style)
 
 RATES = [0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1]
 
@@ -141,8 +141,9 @@ def plot_tails(src: str, fig_dir: str):
                 continue
             subprocess.run(
                 [sys.executable, plot_tail, "--pdf", "--normalize",
-                 "--xmax", str(TAIL_XMAX.get(family, 10)),
-                 "--srcs"] + [d for _, d in runs]
+                 "--xmax", str(TAIL_XMAX.get(family, 10))]
+                + (["--minus-delay"] if family in MINUS_DELAY else [])
+                + ["--srcs"] + [d for _, d in runs]
                 + ["--labels"] + [f"refill {r:g}" for r, _ in runs]
                 + ["--groups"] + ["refill rate"] * len(runs)
                 + ["--out", os.path.join(fig_dir, f"{family}_{workload}_tail.png")],
