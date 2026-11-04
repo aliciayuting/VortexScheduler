@@ -37,9 +37,9 @@ os.environ.setdefault("SIMULATION_DIR", SIM_DIR)
 import run_core_sweep
 
 # core sweep families running a single workflow: pipeline 2 (WF1), textvision
-# (WF6), object defect inspection (WF12), dairy cow teat health (WF13) and
-# time-series defect inspection (WF14)
-FAMILIES = ["ppl2", "wf6", "wf12", "wf13", "wf14"]
+# (WF6), object defect inspection (WF12), dairy cow teat health (WF13),
+# time-series defect inspection (WF14) and its 600 ms round interval variant (WF15)
+FAMILIES = ["ppl2", "wf6", "wf12", "wf13", "wf14", "wf15"]
 
 # refill rates, as fractions of the estimated capacity (ADMISSION_TARGET_UTILIZATION)
 RATES = [0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1]

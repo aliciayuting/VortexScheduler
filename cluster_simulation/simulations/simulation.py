@@ -265,6 +265,9 @@ class Simulation:
         self._produce_nexus_slo_split_log()
         self._produce_admission_control_log()
 
+        if gcfg.PRODUCE_QUEUE_LOG:
+            self._produce_queue_length_log()
+
         if gcfg.ENABLE_LIVE_VERIFICATION:
             self.verifier.verify_on_sim_end()
 
@@ -285,6 +288,20 @@ class Simulation:
         worker_log.to_csv(os.path.join(self.out_path, "worker_config_log.csv"))
         self.worker_config_log = worker_log
         # TODO: client log
+
+
+    def _produce_queue_length_log(self):
+        """Writes the length of every worker queue each time it changed, for
+        plotting queueing over time. A queue holds the length on its row until
+        its next row; worker_config_log.csv says which partition each worker is.
+        """
+        rows = [(time, worker.id, model_id, length)
+                for worker in self.workers.values()
+                for time, model_id, length in worker.queue_length_log]
+        queue_log = pd.DataFrame(rows, columns=["time", "worker_id", "model_id",
+                                                "queue_length"])
+        queue_log.sort_values("time", kind="stable").to_csv(
+            os.path.join(self.out_path, "queue_length_log.csv"), index=False)
 
 
     def _produce_admission_control_log(self):

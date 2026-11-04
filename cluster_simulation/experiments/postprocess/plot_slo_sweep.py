@@ -9,10 +9,15 @@ would not do: once more than 1% of jobs are dropped, p99 is infinite.
 
 Reads the results of experiments/run_lookahead_sweep.py, one queue ordering at a
 time. Each run holds every tenant of its tenancy, so there is one row per tenant.
+Tenancies swept over absolute job SLOs (run_lookahead_sweep.FIXED_SLOS) are
+plotted against SLO in ms with --slos-ms, in a figure of their own.
 
 Usage (from cluster_simulation/, after `source set_env.sh`):
     python experiments/postprocess/plot_slo_sweep.py \
         --src experiments/results/lookahead_multitenant --ordering fcfs
+    python experiments/postprocess/plot_slo_sweep.py \
+        --src experiments/results/lookahead_single --slos-ms 1400 1600 1800 2000 \
+        2250 2500 3000 4000
 """
 
 import argparse
@@ -24,7 +29,7 @@ import matplotlib.pyplot as plt
 
 # tenancies run_lookahead_sweep.py names its configurations after, in plot order
 TENANCIES = ["ppl2", "textvision", "textvisionswapped",
-             "wf1", "wf6", "wf12", "wf13", "wf14"]
+             "wf1", "wf6", "wf12", "wf13", "wf14", "wf15"]
 
 # single-tenant tenancies whose SLO multiples are of another workflow's job size,
 # as run_core_sweep.SLO_FROM sets them
@@ -40,9 +45,10 @@ GRID = "#dedcd6"
 SURFACE = "#fcfcfb"
 
 
-def _run_dir(src: str, tenancy: str, workload: str, mult: int, ordering: str,
+def _run_dir(src: str, tenancy: str, workload: str, level: str, ordering: str,
              accounting: str) -> str:
-    return os.path.join(src, f"{tenancy}_{workload}_{mult}x_{ordering}_{accounting}")
+    """[level] is the job SLO as config names give it: <multiple>x or <slo>ms."""
+    return os.path.join(src, f"{tenancy}_{workload}_{level}_{ordering}_{accounting}")
 
 
 def _read_jobs(run_dir: str) -> pd.DataFrame:
@@ -63,19 +69,26 @@ def _miss_rate(jobs: pd.DataFrame, wid: int) -> float:
     return 100 * (1 - met.mean())
 
 
-def plot_slo_sweep(src: str, multiples: list[int], ordering: str, out_path: str):
+def plot_slo_sweep(src: str, levels: list[str], ordering: str, out_path: str):
     """Plots missed SLO share against job SLO, one panel per tenant and workload.
 
     Args:
         src: Sweep results directory, holding one directory per configuration
-        multiples: Job SLOs to plot, as multiples of job size
+        levels: Job SLOs to plot, as config names give them: all <multiple>x, or
+        all <slo>ms
         ordering: Queue ordering to plot, as named in the configurations
         out_path: Where to write the figure
     """
-    run_dirs = {(tenancy, workload, mult, key): _run_dir(src, tenancy, workload, mult,
-                                                          ordering, key)
+    in_ms = all(level.endswith("ms") for level in levels)
+    assert(in_ms or all(level.endswith("x") for level in levels)), \
+        f"SLOs to plot mix multiples of job size and ms: {levels}"
+    # where each level sits on the x axis
+    xs_of = {level: float(level[:-2] if in_ms else level[:-1]) for level in levels}
+
+    run_dirs = {(tenancy, workload, level, key): _run_dir(src, tenancy, workload, level,
+                                                           ordering, key)
                 for tenancy in TENANCIES for workload in ("const", "burst")
-                for mult in multiples for key, _, _ in SERIES}
+                for level in levels for key, _, _ in SERIES}
     run_dirs = {k: d for k, d in run_dirs.items() if os.path.isdir(d)}
     assert(run_dirs), f"No {ordering} runs of run_lookahead_sweep.py found in {src}"
 
@@ -94,12 +107,12 @@ def plot_slo_sweep(src: str, multiples: list[int], ordering: str, out_path: str)
     for ax, (tenancy, wid, workload) in zip(axes.flat, panels):
         for key, label, color in SERIES:
             xs, ys = [], []
-            for mult in multiples:
-                if (tenancy, workload, mult, key) not in jobs:
+            for level in levels:
+                if (tenancy, workload, level, key) not in jobs:
                     continue
 
-                xs.append(mult)
-                ys.append(_miss_rate(jobs[(tenancy, workload, mult, key)], wid))
+                xs.append(xs_of[level])
+                ys.append(_miss_rate(jobs[(tenancy, workload, level, key)], wid))
 
             # a series the sweep did not run is left out of the legend too
             if not xs:
@@ -126,8 +139,8 @@ def plot_slo_sweep(src: str, multiples: list[int], ordering: str, out_path: str)
     axes[0][0].set_ylim(0, None)
     axes[0][0].legend(frameon=False, fontsize=9, labelcolor=INK_SECONDARY)
     for ax in axes[-1]:
-        ax.set_xlabel("Job SLO (multiples of job size)", color=INK_SECONDARY,
-                      fontsize=10)
+        ax.set_xlabel("Job SLO (ms)" if in_ms else "Job SLO (multiples of job size)",
+                      color=INK_SECONDARY, fontsize=10)
     for ax in axes[:, 0]:
         ax.set_ylabel("Jobs missing the SLO (%)", color=INK_SECONDARY, fontsize=10)
 
@@ -143,18 +156,25 @@ if __name__ == "__main__":
     parser.add_argument("--multiples", type=int, nargs="+",
                         default=[3, 4, 5, 6, 7, 8, 9, 10],
                         help="Job SLOs to plot, as multiples of job size")
+    parser.add_argument("--slos-ms", type=int, nargs="+",
+                        help="Plot the tenancies swept over absolute job SLOs "
+                             "instead, at these SLOs (ms). Replaces --multiples")
     parser.add_argument("--ordering", type=str, default="fcfs",
                         choices=["fcfs", "edf", "ap"],
                         help="Queue ordering to plot (default: fcfs)")
     parser.add_argument("--out", type=str,
-                        help="Output path "
-                             "(default: [src]/figures/slo_sweep_[ordering].png)")
+                        help="Output path (default: [src]/figures/"
+                             "slo_sweep_[ordering].png, or slo_sweep_[ordering]_ms.png "
+                             "with --slos-ms)")
 
     args = parser.parse_args()
 
-    out_path = args.out or os.path.join(args.src, "figures",
-                                        f"slo_sweep_{args.ordering}.png")
+    out_path = args.out or os.path.join(
+        args.src, "figures",
+        f"slo_sweep_{args.ordering}" + ("_ms" if args.slos_ms else "") + ".png")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-    plot_slo_sweep(args.src, args.multiples, args.ordering, out_path)
+    levels = ([f"{slo}ms" for slo in args.slos_ms] if args.slos_ms
+              else [f"{mult}x" for mult in args.multiples])
+    plot_slo_sweep(args.src, levels, args.ordering, out_path)
     print(f"wrote {out_path}")

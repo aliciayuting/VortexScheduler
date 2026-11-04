@@ -29,7 +29,8 @@ import matplotlib.pyplot as plt
 
 FAMILIES = [("ppl2", "WF1 (pipeline 2)"), ("wf6", "WF6 (textvision)"),
             ("wf12", "WF12 (defect inspection)"), ("wf13", "WF13 (cow teat health)"),
-            ("wf14", "WF14 (time-series defect inspection)")]
+            ("wf14", "WF14 (time-series defect inspection)"),
+            ("wf15", "WF15 (WF14, rounds 600 ms apart)")]
 # runs missing for a scale (0.125x exists only for WF6) are skipped
 SCALES = [0.125, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
@@ -41,8 +42,9 @@ MINUS_DELAY = {"wf14"}
 
 # right edge of each family's tail plot, in multiples of job size (or of
 # cumulative stage runtime, for MINUS_DELAY families). WF14's SLO (WF12's) is 5.4x
-# its stage runtime after the delay, and its tails run out to about 15x
-TAIL_XMAX = {"wf14": 20}
+# its stage runtime after the delay, and its tails run out to about 15x. WF15's
+# 2000 ms SLO is 1.65x its job size, and its tails run out to about 3x
+TAIL_XMAX = {"wf14": 20, "wf15": 3.5}
 
 # categorical slots 1 and 2, as in plot_slo_sweep.py
 SERIES = [("const", "constant", "#2a78d6"), ("burst", "bursty", "#eb6834")]

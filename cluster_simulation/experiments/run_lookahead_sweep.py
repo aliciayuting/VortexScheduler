@@ -19,13 +19,15 @@ The multi-tenant workloads are what the orderings are compared on. Under
 job-level SLOs a job's EDF key is its create time plus its SLO, so with a single
 workflow EDF and FCFS order the queue identically and only differ once tenants
 with different SLOs share the cluster. The single-tenant tenancies (WF1, WF6,
-WF12, WF13, WF14 on their own, on the core sweep's allocations and workloads)
-therefore run under FCFS only, and only with the ahead-of-it accounting.
+WF12, WF13, WF14, WF15 on their own, on the core sweep's allocations and
+workloads) therefore run under FCFS only, and only with the ahead-of-it
+accounting.
 
 Each tenancy is run under a constant and a bursty workload, across job SLOs from
 3x to 10x each workflow's job size (its critical path at batch size 1), so every
 tenant's SLO scales together and their ratios, which is what EDF sorts on, stay
-fixed.
+fixed. Tenancies in FIXED_SLOS are instead run across the job SLOs (ms) listed
+there, named <slo>ms rather than <multiple>x.
 
 Each configuration runs in its own process so that the RNG seeding in
 run_experiment.py is identical across configurations, i.e. every configuration of
@@ -61,6 +63,12 @@ JOB_SIZES = {1: 256.1, 4: 787.0, 5: 388.7,
 
 SLO_MULTIPLES = [3, 4, 5, 6, 7, 8, 9, 10]
 
+# tenancies run across these job SLOs (ms) instead of SLO_MULTIPLES. WF15's job
+# size is almost all its 1200 ms wait for the last round of images, so multiples
+# of it start at 3.6 s and never reach the 2000 ms SLO the core sweep holds it to;
+# these bracket that SLO instead
+FIXED_SLOS = {"wf15": [1400, 1600, 1800, 2000, 2250, 2500, 3000, 4000]}
+
 # the workflows sharing the cluster in each tenancy. The two textvision tenancies
 # run the same three pipelines with the variant model at opposite ends: in
 # textvision its stage is last, in textvisionswapped first
@@ -71,7 +79,7 @@ TENANCIES = {"ppl2": [1, 4, 5],
 # single-tenant tenancies, each the core sweep family running that one workflow.
 # Their allocation, workloads and job sizes are the core sweep's
 SINGLE_TENANCIES = {"wf1": "ppl2", "wf6": "wf6", "wf12": "wf12", "wf13": "wf13",
-                    "wf14": "wf14"}
+                    "wf14": "wf14", "wf15": "wf15"}
 for _tenancy, _family in SINGLE_TENANCIES.items():
     TENANCIES[_tenancy] = run_core_sweep.FAMILIES[_family]
 
@@ -149,36 +157,56 @@ ORDERINGS = {"fcfs": "FCFS", "edf": "EDF", "ap": "ACCUMULATING_PRIORITY"}
 ACCOUNTINGS = {"ahead": False, "whole": True}
 
 
+def _slo_levels(tenancy: str) -> list[str]:
+    """Returns the job SLO settings [tenancy] is swept across, as they appear in
+    config names: <multiple>x, or <slo>ms for the tenancies in FIXED_SLOS.
+    """
+    if tenancy in FIXED_SLOS:
+        return [f"{slo}ms" for slo in FIXED_SLOS[tenancy]]
+    return [f"{mult}x" for mult in SLO_MULTIPLES]
+
+
 def config_names() -> list[str]:
     names = []
-    for tenancy, workload, mult in itertools.product(TENANCIES, ["const", "burst"],
-                                                     SLO_MULTIPLES):
+    for tenancy, workload in itertools.product(TENANCIES, ["const", "burst"]):
         # a single workflow orders identically under every ordering, and is only
         # run under the current accounting
         single = tenancy in SINGLE_TENANCIES
         orderings = ["fcfs"] if single else ORDERINGS
         accountings = ["ahead"] if single else ACCOUNTINGS
-        if not _feasible(tenancy, workload, mult):
-            continue
-        names += [f"{tenancy}_{workload}_{mult}x_{ordering}_{accounting}"
-                  for ordering, accounting in itertools.product(orderings, accountings)]
+        for level in _slo_levels(tenancy):
+            if not _feasible(tenancy, workload, level):
+                continue
+            names += [f"{tenancy}_{workload}_{level}_{ordering}_{accounting}"
+                      for ordering, accounting in itertools.product(orderings,
+                                                                    accountings)]
     return names
 
 
-def _feasible(tenancy: str, workload: str, mult: int) -> bool:
-    """Whether every tenant's SLO at [mult] exceeds its own job size. Only a tenant
-    held to another workflow's SLO (run_core_sweep.SLO_FROM) can fall short.
+def _feasible(tenancy: str, workload: str, level: str) -> bool:
+    """Whether every tenant's SLO at [level] exceeds its own job size. Only a tenant
+    held to another workflow's SLO (run_core_sweep.SLO_FROM), or to a fixed one,
+    can fall short.
     """
     if tenancy not in SINGLE_TENANCIES:
         return True
     family = SINGLE_TENANCIES[tenancy]
     return all(slo > run_core_sweep.job_runtime(family, wid)
-               for wid, slo in _job_slos(tenancy, workload, mult).items())
+               for wid, slo in _level_slos(tenancy, workload, level).items())
 
 
-def _parse(config_name: str) -> tuple[str, str, int, str, str]:
-    tenancy, workload, mult, ordering, accounting = config_name.split("_")
-    return tenancy, workload, int(mult[:-1]), ordering, accounting
+def _parse(config_name: str) -> tuple[str, str, str, str, str]:
+    tenancy, workload, level, ordering, accounting = config_name.split("_")
+    return tenancy, workload, level, ordering, accounting
+
+
+def _level_slos(tenancy: str, workload: str, level: str) -> dict[int, int]:
+    """Returns the job SLO (ms) each tenant of [tenancy] is given at [level]: the
+    SLO itself for <slo>ms, or [_job_slos] at that multiple for <multiple>x.
+    """
+    if level.endswith("ms"):
+        return {wid: int(level[:-2]) for wid in WORKLOADS[(tenancy, workload)]}
+    return _job_slos(tenancy, workload, int(level[:-1]))
 
 
 def _job_slos(tenancy: str, workload: str, mult: int) -> dict[int, int]:
@@ -207,8 +235,8 @@ def _job_slos(tenancy: str, workload: str, mult: int) -> dict[int, int]:
 
 
 def _overrides(config_name: str) -> dict:
-    tenancy, workload, mult, ordering, accounting = _parse(config_name)
-    slos = _job_slos(tenancy, workload, mult)
+    tenancy, workload, level, ordering, accounting = _parse(config_name)
+    slos = _level_slos(tenancy, workload, level)
 
     return {"CLIENT_CONFIGS": [{wid: {"WORKLOAD": wl, "SLO": slos[wid]}}
                                for wid, wl in WORKLOADS[(tenancy, workload)].items()],

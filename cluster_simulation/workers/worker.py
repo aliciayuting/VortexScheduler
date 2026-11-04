@@ -77,6 +77,10 @@ class Worker(EventListener):
         self.shadow_dropped_job_ids: set[int] = set()
 
         self.queues: dict[int, PriorityQueue] = {}
+        # (time, model ID, queue length) each time one of [queues] changes length,
+        # for queue_length_log.csv. Empty unless PRODUCE_QUEUE_LOG
+        self.queue_length_log: list[tuple[float, int, int]] = []
+        self._logged_queue_lengths: dict[int, int] = {}
         self.completed_tasks: dict[tuple[int, int], Task] = {}
         self.scheduled_task_to_worker: dict[tuple[int, int], UUID] = {} # (job ID, task ID) -> worker ID
 
@@ -151,7 +155,23 @@ class Worker(EventListener):
 
         else:
             raise ValueError(f"Worker received unregistered event: {event}")
-        
+
+        if gcfg.PRODUCE_QUEUE_LOG:
+            self._log_queue_lengths(event.time)
+
+
+    def _log_queue_lengths(self, time: float):
+        """Records the length of every queue on this worker that has changed since
+        it was last recorded. Called after each event this worker handles, which
+        covers everywhere its queues are filled, drained into batches or dropped
+        from.
+        """
+        for model_id, queue in self.queues.items():
+            length = queue.qsize()
+            if self._logged_queue_lengths.get(model_id) != length:
+                self._logged_queue_lengths[model_id] = length
+                self.queue_length_log.append((time, model_id, length))
+
 
     def on_tasks_assigned(self, tasks: list[Task], forced_instance_id: UUID | None):
         for task in tasks:

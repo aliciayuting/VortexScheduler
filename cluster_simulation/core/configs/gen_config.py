@@ -3,7 +3,7 @@ import numpy as np
 """ --------      Verification Parameters      -------- """
 
 PRODUCE_EVENT_LOG = True
-
+PRODUCE_QUEUE_LOG = True
 ENABLE_LIVE_VERIFICATION = False
 
 # Runs a trace of produced event logs to verify simulator actions

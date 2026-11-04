@@ -40,9 +40,9 @@ import run_core_sweep
 from run_refill_rate_sweep import RATES
 
 # core sweep families running a single workflow: pipeline 2 (WF1), textvision
-# (WF6), object defect inspection (WF12), dairy cow teat health (WF13) and
-# time-series defect inspection (WF14)
-FAMILIES = ["ppl2", "wf6", "wf12", "wf13", "wf14"]
+# (WF6), object defect inspection (WF12), dairy cow teat health (WF13),
+# time-series defect inspection (WF14) and its 600 ms round interval variant (WF15)
+FAMILIES = ["ppl2", "wf6", "wf12", "wf13", "wf14", "wf15"]
 
 # multiples of the derived bucket size
 # 0.125x is only run for WF6, whose SLO attainment was still climbing at 0.25x
