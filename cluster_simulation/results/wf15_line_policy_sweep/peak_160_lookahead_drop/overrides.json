@@ -1,0 +1,199 @@
+{
+  "config": "wf15_peak_160_lookahead_drop",
+  "workflow_id": 15,
+  "peak_lines": 160,
+  "arrival_jobs": 9960,
+  "line_count_steps": [
+    {
+      "start_ms": 0,
+      "active_lines": 40
+    },
+    {
+      "start_ms": 15000,
+      "active_lines": 60
+    },
+    {
+      "start_ms": 30000,
+      "active_lines": 100
+    },
+    {
+      "start_ms": 45000,
+      "active_lines": 160
+    },
+    {
+      "start_ms": 65000,
+      "active_lines": 120
+    },
+    {
+      "start_ms": 80000,
+      "active_lines": 60
+    },
+    {
+      "start_ms": 100000,
+      "active_lines": 80
+    },
+    {
+      "start_ms": 115000,
+      "active_lines": 140
+    },
+    {
+      "start_ms": 130000,
+      "active_lines": 160
+    },
+    {
+      "start_ms": 150000,
+      "active_lines": 100
+    },
+    {
+      "start_ms": 170000,
+      "active_lines": 40
+    },
+    {
+      "start_ms": 190000,
+      "active_lines": 80
+    },
+    {
+      "start_ms": 205000,
+      "active_lines": 120
+    },
+    {
+      "start_ms": 220000,
+      "active_lines": 160
+    },
+    {
+      "start_ms": 245000,
+      "active_lines": 100
+    },
+    {
+      "start_ms": 270000,
+      "active_lines": 60
+    }
+  ],
+  "cycle_alignment": "staggered",
+  "object_interval_ms": 3000.0,
+  "horizon_ms": 300000.0,
+  "slo_ms": 2000,
+  "allocation_family": "wf15",
+  "allocation_source": "run_core_sweep.ALLOCATIONS[\"wf15\"] (Vortex DP custom allocation)",
+  "overrides": {
+    "CLIENT_CONFIGS": [
+      {
+        "15": {
+          "WORKLOAD": {
+            "ARRIVAL_PROCESS": "ALITRACE",
+            "TRACE_FILE_PATH": "/Users/alicia/Desktop/temp/VortexScheduler/cluster_simulation/results/wf15_line_policy_sweep/arrival_traces/wf15_peak_160.csv"
+          },
+          "SLO": 2000
+        }
+      }
+    ],
+    "ALLOCATION_STRATEGY": "CUSTOM",
+    "CUSTOM_ALLOCATION": [
+      [
+        6,
+        [
+          17
+        ]
+      ],
+      [
+        6,
+        [
+          17
+        ]
+      ],
+      [
+        6,
+        [
+          17
+        ]
+      ],
+      [
+        6,
+        [
+          17
+        ]
+      ],
+      [
+        6,
+        [
+          17
+        ]
+      ],
+      [
+        6,
+        [
+          17
+        ]
+      ],
+      [
+        6,
+        [
+          17
+        ]
+      ],
+      [
+        6,
+        [
+          17,
+          19
+        ]
+      ],
+      [
+        6,
+        [
+          18
+        ]
+      ],
+      [
+        6,
+        [
+          18
+        ]
+      ],
+      [
+        6,
+        [
+          18
+        ]
+      ],
+      [
+        6,
+        [
+          18
+        ]
+      ],
+      [
+        6,
+        [
+          18
+        ]
+      ],
+      [
+        6,
+        [
+          18
+        ]
+      ],
+      [
+        6,
+        [
+          18
+        ]
+      ],
+      [
+        6,
+        [
+          18
+        ]
+      ]
+    ],
+    "DISPATCH_POLICY": "ROUND_ROBIN",
+    "PRODUCE_EVENT_LOG": false,
+    "PRODUCE_QUEUE_LOG": true,
+    "EXEC_TIME_DISTRIBUTION": "NORMAL",
+    "BOOST_POLICY": "FCFS",
+    "DROP_POLICY": "LOOKAHEAD",
+    "SLO_TYPE": "JOB_LEVEL",
+    "ADMISSION_CONTROL_POLICY": "NONE"
+  }
+}
