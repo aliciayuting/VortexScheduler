@@ -312,6 +312,24 @@ ADMISSION_BURST_SIZE = None
 # derivation. Ignored when ADMISSION_BURST_SIZE is set
 ADMISSION_BURST_SCALE = 1.0
 
+# TOKEN_BUCKET: adapt bucket size at run time. The bucket starts at default size.
+# Every window of completed jobs, the p99 of their response time is checked: below
+# 1 - ADAPTIVE_BUCKET_SLACK_MARGIN grows the bucket by ADAPTIVE_BUCKET_STEP jobs,
+# above 1 (an SLO miss) multiplies it by ADAPTIVE_BUCKET_DECREASE_FACTOR. The size
+# is clamped to [ADAPTIVE_BUCKET_MIN_SIZE, ADAPTIVE_BUCKET_MAX_SCALE x default size]
+ADAPTIVE_BUCKET = False
+ADAPTIVE_BUCKET_WINDOW_TYPE = "COUNT" # COUNT | TIME
+ADAPTIVE_BUCKET_WINDOW = 200
+ADAPTIVE_BUCKET_MIN_SAMPLES = 100
+ADAPTIVE_BUCKET_SLACK_MARGIN = 0.1
+ADAPTIVE_BUCKET_STEP = 1.0
+ADAPTIVE_BUCKET_DECREASE_FACTOR = 0.5
+ADAPTIVE_BUCKET_MIN_SIZE = 3.0
+ADAPTIVE_BUCKET_MAX_SCALE = 2.5
+ADAPTIVE_BUCKET_IGNORE_STALE = True # only count jobs admitted after last resize
+# only grow when the bucket rejected at least one job since the last decision
+ADAPTIVE_BUCKET_GROW_ONLY_IF_REJECTING = False
+
 ENABLE_MULTITHREADING = True # allow multiple models on same partition to run at once
 
 # CUSTOM | VORTEX

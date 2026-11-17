@@ -51,14 +51,19 @@ class Scheduler(EventListener):
         # regardless of where queues are managed.
         self.admission_controller = AdmissionController(workflows, workers)
 
-        self.em.register_listener(self, {
+        listened = {
             EVENT_TYPES[EventIds.JOB_ARRIVAL_AT_SCHEDULER],
             EVENT_TYPES[EventIds.TASKS_ARRIVAL_AT_SCHEDULER],
             EVENT_TYPES[EventIds.JOBS_DROPPED],
             EVENT_TYPES[EventIds.JOBS_SHADOW_DROPPED],
             EVENT_TYPES[EventIds.BATCH_STARTED_AT_WORKER],
             EVENT_TYPES[EventIds.BATCH_FINISHED_AT_WORKER]
-        })
+        }
+        # adaptive admission sizes its buckets from the response times the clients
+        # see, so it hears about each job as its client does
+        if self.admission_controller.adaptive:
+            listened.add(EVENT_TYPES[EventIds.RESPONSE_RECEIVED_AT_CLIENT])
+        self.em.register_listener(self, listened)
 
         self.emitter_id = self.em.register_emitter(Agent.SCHEDULER, {
             EVENT_TYPES[EventIds.TASKS_ASSIGNED_TO_WORKER],
@@ -120,8 +125,10 @@ class Scheduler(EventListener):
             self.on_batch_start(event.time, event.kwargs["batch"], event.kwargs["worker_id"],
                                 event.kwargs["model_instance_id"])
         elif event.type.id == EventIds.BATCH_FINISHED_AT_WORKER:
-            self.on_batch_finish(event.time, event.kwargs["batch"], event.kwargs["worker_id"], 
+            self.on_batch_finish(event.time, event.kwargs["batch"], event.kwargs["worker_id"],
                                  event.kwargs["model_instance_id"])
+        elif event.type.id == EventIds.RESPONSE_RECEIVED_AT_CLIENT:
+            self.admission_controller.observe_response(event.time, event.kwargs["job"])
         else:
             raise ValueError(f"Scheduler received unregistered event: {event}")
 

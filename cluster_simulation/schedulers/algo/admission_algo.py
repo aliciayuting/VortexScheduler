@@ -125,6 +125,127 @@ class TokenBucket:
         self.tokens -= cost
         return True
 
+    def resize(self, time: float, depth: float):
+        """Changes the bucket size to [depth] at [time].
+
+        Tokens earned up to [time] are credited against the old size first. A
+        shrinking bucket spills whatever no longer fits; a growing one gains room
+        but no tokens, which it has to earn at its rate like any others.
+        """
+        assert(depth >= 0)
+        self._refill(time)
+        self.depth = depth
+        self.tokens = min(self.tokens, depth)
+
+
+class AdaptiveBucketSizer:
+    """Adapts one token bucket's size to the response time tail it produces.
+
+    The refill rate is left alone: it sets the long run admitted throughput, which
+    is fixed at what the cluster can serve. The bucket size only decides how large
+    a burst is let in on top of that, and the right answer depends on how bursty
+    the arrivals actually are and how much SLO slack the cluster really has, which
+    the static derivation can only estimate. So the size is tuned online with an
+    additive increase, multiplicative decrease rule on the p99 response time:
+
+        p99 > SLO                      size *= ADAPTIVE_BUCKET_DECREASE_FACTOR
+        p99 < (1 - margin) * SLO       size += ADAPTIVE_BUCKET_STEP
+        otherwise                      hold
+
+    clamped to [ADAPTIVE_BUCKET_MIN_SIZE, ADAPTIVE_BUCKET_MAX_SCALE x default].
+    Growing slowly and shrinking fast probes for slack while backing off
+    immediately once a burst does harm. Under ADAPTIVE_BUCKET_GROW_ONLY_IF_REJECTING
+    a window whose bucket rejected nobody holds instead of growing: low p99 while
+    the bucket is not the binding limit (a quiet stretch) is no evidence that a
+    larger burst would be served on time.
+
+    Response times are taken as fractions of each job's own SLO, so a bucket shared
+    by workflows with different SLOs (AGGREGATE scope) judges them on one scale.
+    Windows are tumbling: each decision sees only the jobs observed since the last
+    one.
+    """
+
+    def __init__(self, bucket_label: str, default_depth: float):
+        assert(gcfg.ADAPTIVE_BUCKET_WINDOW_TYPE in ("COUNT", "TIME")), \
+            f"Unrecognized ADAPTIVE_BUCKET_WINDOW_TYPE {gcfg.ADAPTIVE_BUCKET_WINDOW_TYPE}"
+        assert(gcfg.ADAPTIVE_BUCKET_WINDOW > 0)
+        assert(0 <= gcfg.ADAPTIVE_BUCKET_SLACK_MARGIN < 1)
+        assert(0 < gcfg.ADAPTIVE_BUCKET_DECREASE_FACTOR < 1)
+        assert(gcfg.ADAPTIVE_BUCKET_STEP > 0)
+
+        self.label = bucket_label
+        self.default_depth = default_depth
+        self.max_depth = gcfg.ADAPTIVE_BUCKET_MAX_SCALE * default_depth
+        # a default bucket so small that its cap falls under the floor would leave
+        # no valid size, so the floor gives way to the cap
+        self.min_depth = min(gcfg.ADAPTIVE_BUCKET_MIN_SIZE, self.max_depth)
+
+        # response time / SLO of every job observed in the current window
+        self.window: list[float] = []
+        self.window_start: float | None = None
+        # time of the last resize, before which admitted jobs are stale
+        self.last_resize_time = -np.inf
+        # jobs the bucket rejected since the last decision
+        self.rejections = 0
+
+        # one dict per decision, for the run's adaptive_bucket_log.csv
+        self.history: list[dict] = []
+
+    def clamp(self, depth: float) -> float:
+        return min(self.max_depth, max(self.min_depth, depth))
+
+    def is_stale(self, admit_time: float) -> bool:
+        return gcfg.ADAPTIVE_BUCKET_IGNORE_STALE and admit_time < self.last_resize_time
+
+    def observe(self, time: float, normalized_response_time: float,
+                bucket: TokenBucket):
+        """Records one completed job, resizing [bucket] if this closes a window."""
+        if self.window_start is None:
+            self.window_start = time
+        self.window.append(normalized_response_time)
+
+        if gcfg.ADAPTIVE_BUCKET_WINDOW_TYPE == "COUNT":
+            if len(self.window) < gcfg.ADAPTIVE_BUCKET_WINDOW:
+                return
+        elif (time - self.window_start < gcfg.ADAPTIVE_BUCKET_WINDOW
+              or len(self.window) < gcfg.ADAPTIVE_BUCKET_MIN_SAMPLES):
+            return
+
+        self._decide(time, bucket)
+
+    def _decide(self, time: float, bucket: TokenBucket):
+        p99 = float(np.quantile(self.window, 0.99))
+        old = bucket.depth
+
+        if p99 > 1:
+            target, action = old * gcfg.ADAPTIVE_BUCKET_DECREASE_FACTOR, "shrink"
+        elif p99 < 1 - gcfg.ADAPTIVE_BUCKET_SLACK_MARGIN:
+            if gcfg.ADAPTIVE_BUCKET_GROW_ONLY_IF_REJECTING and self.rejections == 0:
+                # slack, but the bucket was not what limited admission
+                target, action = old, "hold_not_rejecting"
+            else:
+                target, action = old + gcfg.ADAPTIVE_BUCKET_STEP, "grow"
+        else:
+            target, action = old, "hold"
+
+        new = self.clamp(target)
+        if action in ("grow", "shrink") and new == old:
+            action += "_clamped"
+
+        if new != old:
+            bucket.resize(time, new)
+            self.last_resize_time = time
+
+        self.history.append({"time": time, "bucket": self.label,
+                             "window_start": self.window_start,
+                             "samples": len(self.window), "p99_over_slo": p99,
+                             "rejections": self.rejections, "action": action,
+                             "depth_before": old, "depth_after": new})
+
+        self.window = []
+        self.window_start = None
+        self.rejections = 0
+
 
 class AdmissionController:
     """Applies the configured admission control policy to arriving work.
@@ -195,10 +316,22 @@ class AdmissionController:
         self.buckets: dict = {}
 
         # one (time, bucket key, key, job ID, tokens available, admitted, tokens
-        # left) per bucket decision, TOKEN_BUCKET only. Between decisions a bucket
-        # only refills at its rate up to its depth, so these pin its level at
+        # left, depth) per bucket decision, TOKEN_BUCKET only. Between decisions a
+        # bucket only refills at its rate up to its depth, so these pin its level at
         # every point in the run
         self.token_history: list[tuple] = []
+
+        # ADAPTIVE_BUCKET only: bucket key -> its sizer, and job ID -> time the job
+        # was admitted, until its response is observed
+        self.adaptive = (gcfg.ADMISSION_CONTROL_POLICY == "TOKEN_BUCKET"
+                         and gcfg.ADAPTIVE_BUCKET)
+        self.sizers: dict = {}
+        self.admit_times: dict[int, float] = {}
+        if self.adaptive:
+            # a job's response time says nothing about which of its stage buckets
+            # was too generous, so only one-bucket-per-job admission is adapted
+            assert(not self.per_task), \
+                "ADAPTIVE_BUCKET is only supported for ADMISSION_GRANULARITY = JOB"
 
         if gcfg.ADMISSION_CONTROL_POLICY == "TOKEN_BUCKET":
             assert(workflows is not None and workers is not None), \
@@ -338,7 +471,14 @@ class AdmissionController:
                 else depths[bucket_key] * gcfg.ADMISSION_BURST_SCALE
 
             # a bucket that can never hold a single token would reject everything
-            self.buckets[bucket_key] = TokenBucket(rate, max(1.0, depth), start_time)
+            depth = max(1.0, depth)
+
+            if self.adaptive:
+                sizer = AdaptiveBucketSizer(self._bucket_label(bucket_key), depth)
+                self.sizers[bucket_key] = sizer
+                depth = sizer.clamp(depth)
+
+            self.buckets[bucket_key] = TokenBucket(rate, depth, start_time)
 
     @staticmethod
     def _get_stage_slack(workflow: Workflow, task_id: int, exec_time: float,
@@ -421,9 +561,44 @@ class AdmissionController:
         # what is left plus whatever was just spent
         self.token_history.append((time, bucket_key, key, job_id,
                                    bucket.tokens + (1 if consumed else 0),
-                                   consumed, bucket.tokens))
+                                   consumed, bucket.tokens, bucket.depth))
+
+        if self.adaptive:
+            if consumed:
+                self.admit_times[job_id] = time
+            else:
+                self.sizers[bucket_key].rejections += 1
 
         return consumed
+
+    def observe_response(self, time: float, job: Job):
+        """Feeds the response time of [job], which completed at [time], to the
+        sizer of the bucket that admitted it. No-op unless ADAPTIVE_BUCKET.
+
+        Only completed jobs are observed: a rejected job has no response time, and
+        a job dropped in flight never reports back.
+        """
+        if not self.adaptive:
+            return
+
+        admit_time = self.admit_times.pop(job.id, None)
+        assert(admit_time is not None), \
+            f"Response for job {job.id}, which was never admitted"
+
+        bucket_key = self.bucket_keys[job.job_type_id]
+        sizer = self.sizers[bucket_key]
+        if sizer.is_stale(admit_time):
+            return
+
+        sizer.observe(time, (time - job.create_time) / job.slo, self.buckets[bucket_key])
+
+    def get_resize_log(self) -> list[dict]:
+        """Returns every ADAPTIVE_BUCKET decision, for the run's
+        adaptive_bucket_log.csv: the window it judged, the window's p99 response
+        time as a fraction of the SLO, and the bucket size before and after.
+        """
+        return sorted((row for sizer in self.sizers.values() for row in sizer.history),
+                      key=lambda row: row["time"])
 
     def _count(self, key, reject: bool):
         counter = self.rejected if reject else self.admitted
@@ -488,6 +663,7 @@ class AdmissionController:
             bucket = self.buckets.get(bucket_key)
 
             wid, task_id = key if self.per_task else (key, np.nan)
+            sizer = self.sizers.get(bucket_key)
 
             stats.append({
                 "workflow_id": wid,
@@ -498,7 +674,11 @@ class AdmissionController:
                 "bucket": self._bucket_label(bucket_key) if bucket else "",
                 "estimated_capacity_qps": self.capacities.get(key, np.nan),
                 "admit_rate_qps": bucket.rate * 1000 if bucket else np.nan,
+                # the size the bucket ended the run at; under ADAPTIVE_BUCKET the
+                # size it started at is default_burst_size_jobs
                 "burst_size_jobs": bucket.depth if bucket else np.nan,
+                "default_burst_size_jobs": sizer.default_depth if sizer
+                    else (bucket.depth if bucket else np.nan),
                 "num_admitted": admitted,
                 "num_rejected": rejected,
                 "reject_fraction": rejected / (admitted + rejected) if admitted + rejected else 0,
@@ -516,7 +696,8 @@ class AdmissionController:
         workflow and task say which tenant drew on the shared bucket.
         """
         rows = []
-        for time, bucket_key, key, job_id, available, consumed, left in self.token_history:
+        for time, bucket_key, key, job_id, available, consumed, left, depth \
+                in self.token_history:
             wid, task_id = key if self.per_task else (key, np.nan)
             rows.append({
                 "time": time,
@@ -527,7 +708,8 @@ class AdmissionController:
                 "tokens_available": available,
                 "admitted": consumed,
                 "tokens_left": left,
-                "depth": self.buckets[bucket_key].depth,
+                # at the time of the decision, which ADAPTIVE_BUCKET may change
+                "depth": depth,
             })
 
         return rows

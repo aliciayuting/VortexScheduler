@@ -177,5 +177,7 @@ EVENT_TYPES: dict[int, EventType] = {
                 "client_id": True, 
                 "worker_id": True},
         emitter_types=[Agent.NETWORK],
-        listener_types=[Agent.CLIENT, Agent.LOGGER, Agent.VERIFIER]),
+        # the scheduler listens only under ADAPTIVE_BUCKET admission, which sizes
+        # its buckets from the response times clients see
+        listener_types=[Agent.CLIENT, Agent.SCHEDULER, Agent.LOGGER, Agent.VERIFIER]),
 }

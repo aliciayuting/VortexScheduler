@@ -319,6 +319,12 @@ class Simulation:
             pd.DataFrame(token_log).to_csv(os.path.join(self.out_path, "token_bucket_log.csv"),
                                            index=False)
 
+        # every bucket size decision ADAPTIVE_BUCKET took
+        resize_log = self.scheduler.admission_controller.get_resize_log()
+        if resize_log:
+            pd.DataFrame(resize_log).to_csv(
+                os.path.join(self.out_path, "adaptive_bucket_log.csv"), index=False)
+
 
     def _produce_nexus_slo_split_log(self):
         """Writes the per-stage SLO split that NexusSLOSplitter produced for each
