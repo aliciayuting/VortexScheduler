@@ -50,8 +50,9 @@ SCALES = [0.125, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
 
 def config_names() -> list[str]:
-    names = [f"{family}_{workload}_{scale:g}x" for family, workload, scale
-             in itertools.product(FAMILIES, ["const", "burst"], SCALES)]
+    # every workload the core sweep defines for these families
+    names = [f"{family}_{workload}_{scale:g}x" for (family, workload), scale
+             in itertools.product(run_core_sweep.WORKLOADS, SCALES) if family in FAMILIES]
     return names + [f"{name}_rate{rate:g}" for name in names for rate in RATES]
 
 

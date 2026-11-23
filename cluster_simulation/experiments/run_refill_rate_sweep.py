@@ -46,8 +46,9 @@ RATES = [0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1]
 
 
 def config_names() -> list[str]:
-    return [f"{family}_{workload}_rate{rate:g}" for family, workload, rate
-            in itertools.product(FAMILIES, ["const", "burst"], RATES)]
+    # every workload the core sweep defines for these families
+    return [f"{family}_{workload}_rate{rate:g}" for (family, workload), rate
+            in itertools.product(run_core_sweep.WORKLOADS, RATES) if family in FAMILIES]
 
 
 def _overrides(config_name: str) -> dict:

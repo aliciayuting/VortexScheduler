@@ -66,8 +66,9 @@ def optimal_bucket(family: str, workload: str):
 
 
 def config_names() -> list[str]:
+    # every workload the core sweep defines for these families
     return [f"{family}_{workload}_adaptive"
-            for family, workload in itertools.product(FAMILIES, ["const", "burst"])]
+            for family, workload in run_core_sweep.WORKLOADS if family in FAMILIES]
 
 
 def _overrides(config_name: str, tuning: dict) -> dict:

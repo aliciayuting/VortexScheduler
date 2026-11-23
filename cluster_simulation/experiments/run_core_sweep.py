@@ -134,6 +134,48 @@ def _burst(rate: int, burst_rate: int, quiet: int, burst: int,
                        {"KIND": "CONSTANT", "RATE": rate, "DURATION": tail}]}
 
 
+# the Alibaba GPU cluster trace, replayed as is (relative to the repository root)
+ALITRACE = {"ARRIVAL_PROCESS": "ALITRACE",
+            "TRACE_FILE_PATH": "workflow/alitrace/gpu_trace_2025/filtered_trace.csv"}
+
+
+# WF15 assembly lines: core/configs/wf15_workload.py's three peak staircase of
+# active lines, scaled so its peaks reach [peak_lines], each line sending one
+# object every 3 s with the lines' phases staggered across that cycle. The traces
+# are deterministic and written on first use (relative to the repository root)
+WF15_LINES_TRACE_DIR = "workflow/wf15_lines"
+
+
+def _wf15_lines_trace(peak_lines: int) -> str:
+    return f"{WF15_LINES_TRACE_DIR}/wf15_staggered_peak{peak_lines}.csv"
+
+
+def _wf15_lines(peak_lines: int) -> dict:
+    return {"ARRIVAL_PROCESS": "ALITRACE", "TRACE_FILE_PATH": _wf15_lines_trace(peak_lines),
+            "WF15_PEAK_LINES": peak_lines}
+
+
+def write_wf15_lines_trace(peak_lines: int) -> str:
+    """Writes the staggered WF15 line trace peaking at [peak_lines] lines, if it is
+    not there yet, and returns its absolute path."""
+    from core.configs.wf15_workload import (DEFAULT_LINE_COUNT_STEPS, LineCountStep,
+                                            generate_object_arrivals, write_arrival_trace)
+
+    path = os.path.join(os.path.dirname(SIM_DIR), _wf15_lines_trace(peak_lines))
+    if os.path.exists(path):
+        return path
+
+    base_peak = max(step.active_lines for step in DEFAULT_LINE_COUNT_STEPS)
+    steps = [LineCountStep(step.start_ms, round(step.active_lines * peak_lines / base_peak))
+             for step in DEFAULT_LINE_COUNT_STEPS]
+    # written alongside and moved into place, so parallel runs never read half a file
+    tmp = f"{path}.{os.getpid()}.tmp"
+    write_arrival_trace(generate_object_arrivals(line_count_steps=steps,
+                                                 align_cycles=False), tmp)
+    os.replace(tmp, path)
+    return path
+
+
 # workflow ID -> workload, per family and workload kind
 WORKLOADS = {
     ("wf12", "const"): {12: _const(38, 20000)},
@@ -145,11 +187,16 @@ WORKLOADS = {
     # 50 qps and each spike's backlog drains within the quiet stretch after it
     ("wf15", "const"): {15: _const(52, 20000)},
     ("wf15", "burst"): {15: _burst(40, 100, 50000, 10000, 360000, 50000)},
+    # assembly lines peaking at 200 and 240 lines (66.7 and 80 qps) over 300 s,
+    # averaging 41.5 and 49.8 qps
+    ("wf15", "staggered200"): {15: _wf15_lines(200)},
+    ("wf15", "staggered240"): {15: _wf15_lines(240)},
     ("wf13", "const"): {13: _const(122, 20000)},
     ("wf13", "burst"): {13: _burst(80, 200, 30000, 10000, 160000, 40000)},
 
     ("wf6", "const"): {6: _const(120, 20000)},
     ("wf6", "burst"): {6: _burst(100, 175, 15000, 3000, 162000, 17750)},
+    ("wf6", "alitrace"): {6: ALITRACE},
 
     ("wf6variants", "const"): {6: _const(40, 5000), 7: _const(40, 5000),
                                8: _const(40, 5000)},
@@ -159,6 +206,7 @@ WORKLOADS = {
 
     ("ppl2", "const"): {1: _const(40, 20000)},
     ("ppl2", "burst"): {1: _burst(30, 80, 30000, 5000, 490000, 60000)},
+    ("ppl2", "alitrace"): {1: ALITRACE},
 
     ("ppl2mt", "const"): {1: _const(8.75, 5000), 4: _const(8.75, 5000), 5: _const(8, 5000)},
     ("ppl2mt", "burst"): {1: _burst(7, 24, 160000, 30000, 190000, 450000),
@@ -254,8 +302,8 @@ def job_slo(family: str, workflow_id: int) -> int:
 
 
 def config_names() -> list[str]:
-    return [f"{family}_{workload}_{policy}" for family, workload, policy
-            in itertools.product(FAMILIES, ["const", "burst"], CORE_POLICIES)]
+    return [f"{family}_{workload}_{policy}" for (family, workload), policy
+            in itertools.product(WORKLOADS, CORE_POLICIES)]
 
 
 def _parse(config_name: str) -> tuple[str, str, str]:
@@ -302,9 +350,17 @@ def _overrides(config_name: str, exec_time_distribution: str,
                out_dir: str | None = None) -> dict:
     family, workload, policy = _parse(config_name)
 
+    # generated traces are written before the run that replays them
+    workloads = {}
+    for wid, wl in WORKLOADS[(family, workload)].items():
+        wl = dict(wl)
+        if "WF15_PEAK_LINES" in wl:
+            write_wf15_lines_trace(wl.pop("WF15_PEAK_LINES"))
+        workloads[wid] = wl
+
     overrides = {"CLIENT_CONFIGS": [
                      {wid: {"WORKLOAD": wl, "SLO": job_slo(family, wid)}}
-                     for wid, wl in WORKLOADS[(family, workload)].items()],
+                     for wid, wl in workloads.items()],
                  "ALLOCATION_STRATEGY": "CUSTOM",
                  "CUSTOM_ALLOCATION": ALLOCATIONS[family],
                  "DISPATCH_POLICY": "ROUND_ROBIN",

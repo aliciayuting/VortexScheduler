@@ -36,10 +36,13 @@ RESULTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # bucket size sweeps the optimal token bucket is picked from, all run by
 # run_bucket_size_sweep.py on the core sweep's arrival traces: at the refill rate
 # the refill rate sweep found best, at the alternative rates that came close, and
-# at the capacity estimate itself. Earlier sweeps win ties
+# at the capacity estimate itself. The AliTrace and WF15 staggered line workloads'
+# sweeps hold only their own runs, at the refill rates their refill rate sweeps
+# favored. Earlier sweeps win ties
 OPTIMAL_SWEEPS = [os.path.join(RESULTS, sweep) for sweep in
                   ("bucket_size_sweep_optrate", "bucket_size_sweep_altrate",
-                   "bucket_size_sweep_rate1")]
+                   "bucket_size_sweep_rate1", "bucket_size_sweep_alitrace",
+                   "bucket_size_sweep_wf15_staggered")]
 
 # LOOKAHEAD run across a range of job SLOs on the core sweep's traces
 # (run_lookahead_sweep.py), from which the optimal LOOKAHEAD is picked

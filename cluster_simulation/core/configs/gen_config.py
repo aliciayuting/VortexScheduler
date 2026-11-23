@@ -328,7 +328,7 @@ ADAPTIVE_BUCKET_MIN_SIZE = 3.0
 ADAPTIVE_BUCKET_MAX_SCALE = 2.5
 ADAPTIVE_BUCKET_IGNORE_STALE = True # only count jobs admitted after last resize
 # only grow when the bucket rejected at least one job since the last decision
-ADAPTIVE_BUCKET_GROW_ONLY_IF_REJECTING = False
+ADAPTIVE_BUCKET_GROW_ONLY_IF_REJECTING = True
 
 ENABLE_MULTITHREADING = True # allow multiple models on same partition to run at once
 
