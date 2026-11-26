@@ -45,7 +45,10 @@ from run_admission_sweep import SWEEP_CONFIGS
 CORE_POLICIES = {
     "nodrop": "central_rr_nodrop",
     "early": "central_rr_early",
-    "nexus": "central_rr_nexus",
+    # Nexus as published, with the batch cap its split implies enforced. The cap
+    # only binds on WF6 (vision_encoder, 7 vs 16); every other family's split
+    # leaves each stage its model's own maximum
+    "nexus": "central_rr_nexus_enforced",
     "lookahead": "central_rr_lookahead",
     "token": "central_rr_token",
     "5token": "central_rr_5token",

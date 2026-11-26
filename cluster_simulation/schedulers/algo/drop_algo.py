@@ -4,16 +4,16 @@ import core.configs.gen_config as gcfg
 
 from core.task import Task
 from queue_management.queued_task import refresh_queue
-from schedulers.algo.boost_algo import _get_processing_time, get_min_exec_time
+from schedulers.algo.boost_algo import get_min_exec_time
 
 
 # NONE:      never drop
 # LAZY:      drop once the job's deadline has already passed
-# EARLY:     drop as soon as the job can no longer meet its deadline, were it the
-#            only job in the cluster
-# LOOKAHEAD: drop as soon as the job can no longer meet its deadline given the work
-#            the cluster has already accepted, i.e. counting the time its remaining
-#            stages will spend queued behind jobs that are already in the system
+# EARLY:     drop as soon as the queued task and the stages downstream of it can no
+#            longer finish by the job's deadline, were it the only job in the cluster
+# LOOKAHEAD: drop as soon as they can no longer do so given the work the cluster has
+#            already accepted, i.e. counting the time those stages will spend queued
+#            behind jobs that are already in the system
 DROP_POLICIES = ["NONE", "LAZY", "EARLY", "LOOKAHEAD"]
 
 # policies that need a ClusterLoadView to decide
@@ -44,86 +44,75 @@ def scheduler_manages_queues() -> bool:
                      "whether queues are managed at the scheduler or at the workers")
 
 
-class _RemainingWork:
-    """What the remaining time walks need to know about a job's incomplete tasks,
-    valid until the job completes another task.
-
-    Every sweep tests every queued task, and a job keeps the same remaining work
-    across the many sweeps it spends queued, so walking its DAG afresh each time
-    dominates a run whose queues are long. Each field is filled the first time a
-    policy asks for it.
+class _Stage:
+    """A task of a workflow as the remaining time walks see it: its model and the
+    stages that follow it. Tasks on the same model with the same stages after them
+    take equally long to finish from, so they share one _Stage, which keeps the
+    walk over a wide fan-out as short as the walk over a single branch of it.
     """
 
-    def __init__(self, version: int):
-        # the job's [num_completed_tasks] when this was computed
-        self.version = version
-        # [get_remaining_processing_time] under job-level SLOs
-        self.processing_time: float | None = None
-        # the incomplete tasks in the order the walks charge them: each wave holds
-        # the tasks whose dependencies are complete or in an earlier wave, as
-        # (task IDs, model ID -> (model data, number of the wave's tasks on it))
-        self.waves: list[tuple[set[int], dict[int, tuple]]] | None = None
+    def __init__(self, model_data, next_stages: tuple["_Stage", ...]):
+        self.model_data = model_data
+        self.next_stages = next_stages
+
+        # every stage downstream of this one, each after all the stages that follow
+        # it, so that one pass can accumulate time from the sinks backwards
+        self.downstream: list[_Stage] = []
+        seen: set[int] = set()
+        for stage in next_stages:
+            for s in stage.downstream + [stage]:
+                if id(s) not in seen:
+                    seen.add(id(s))
+                    self.downstream.append(s)
+
+        # time to finish from here at batch size 1 without queueing: this stage plus
+        # the longest path of stages after it
+        self.processing_time: float = get_min_exec_time(model_data) + max(
+            [s.processing_time for s in next_stages], default=0.0)
 
 
-def _remaining_work(job) -> _RemainingWork:
-    cache = job.remaining_work_cache
-    if cache is None or cache.version != job.num_completed_tasks:
-        cache = job.remaining_work_cache = _RemainingWork(job.num_completed_tasks)
-    return cache
+def _build_stages(workflow) -> dict[int, _Stage]:
+    """Returns task ID -> _Stage for every task of [workflow]."""
+    stages: dict[int, _Stage] = {}
+    shared: dict[tuple, _Stage] = {}
+
+    def _build(task) -> _Stage:
+        if task.id not in stages:
+            next_stages = {id(s): s for s in map(_build, task.next_tasks)}
+            key = (task.model_data.id, frozenset(next_stages))
+            if key not in shared:
+                shared[key] = _Stage(task.model_data, tuple(next_stages.values()))
+            stages[task.id] = shared[key]
+
+        return stages[task.id]
+
+    for task in workflow.tasks.values():
+        _build(task)
+
+    return stages
 
 
-def _complete_task_ids(job) -> set[int]:
-    return {tid for tid, t in job._task_states.items() if t >= 0}
-
-
-def _get_remaining_waves(job) -> list[tuple[set[int], dict[int, tuple]]]:
-    """Returns [job]'s incomplete tasks grouped into waves (see
-    [_RemainingWork.waves]), walking its DAG only when it has changed since the
-    last call.
+def _get_stage(task: Task) -> _Stage:
+    """Returns the _Stage of [task]. A workflow's DAG never changes, and everything
+    downstream of a task that has not run yet is itself yet to run, so what remains
+    from [task] on depends on neither the job nor its progress and is built once
+    per workflow.
     """
-    work = _remaining_work(job)
-    if work.waves is not None:
-        return work.waves
+    workflow = task.job.workflow
+    if workflow.stages_cache is None:
+        workflow.stages_cache = _build_stages(workflow)
 
-    complete_task_ids = _complete_task_ids(job)
-
-    dependencies: dict[int, set[int]] = {}
-    dependents: dict[int, set[int]] = {}
-    available = []
-    for t in job.tasks:
-        dependencies[t.task_id] = set(t.required_task_ids) - complete_task_ids
-        dependents[t.task_id] = set(t.next_task_ids) - complete_task_ids
-
-        if t.task_id not in complete_task_ids and not dependencies[t.task_id]:
-            available.append(t)
-
-    waves = []
-    while available:
-        models: dict[int, tuple] = {}
-        for t in available:
-            model_data, count = models.get(t.model_data.id, (t.model_data, 0))
-            models[t.model_data.id] = (model_data, count + 1)
-        waves.append(({t.task_id for t in available}, models))
-
-        next_available = []
-        for t in available:
-            for dep in dependents[t.task_id]:
-                dependencies[dep].discard(t.task_id)
-                if not dependencies[dep]:
-                    next_available.append(job.get_task_by_id(dep))
-
-        available = next_available
-
-    work.waves = waves
-    return waves
+    return workflow.stages_cache[task.task_id]
 
 
 def get_remaining_processing_time(task: Task, worker_size: int | None = None) -> float:
     """Returns the minimum time still needed before [task]'s deadline can be met.
 
     Under job-level SLOs the deadline is the end of the pipeline, so what remains
-    is the critical path through every incomplete task of the job, assuming batch
-    size 1 and no queueing. Under per-stage (NEXUS) SLOs each stage carries its own
+    is this task followed by the longest path through the stages downstream of it,
+    assuming batch size 1 and no queueing. Stages on parallel paths are left out,
+    even when a join downstream will wait for them: each is judged on its own path
+    while it is queued itself. Under per-stage (NEXUS) SLOs each stage carries its own
     deadline that already budgets for the stages behind it, so the only work left
     to fit is this stage's own execution.
 
@@ -140,12 +129,7 @@ def get_remaining_processing_time(task: Task, worker_size: int | None = None) ->
 
         return get_min_exec_time(task.model_data)
 
-    # the same for every task of the job until it completes another one
-    work = _remaining_work(task.job)
-    if work.processing_time is None:
-        work.processing_time = _get_processing_time(task.job,
-                                                    _complete_task_ids(task.job))
-    return work.processing_time
+    return _get_stage(task).processing_time
 
 
 def get_remaining_time_with_queueing(time: float, task: Task, load_view,
@@ -159,19 +143,14 @@ def get_remaining_time_with_queueing(time: float, task: Task, load_view,
     splits the same way. Under per-stage (NEXUS) SLOs the deadline being tested is
     this stage's, which already budgets for the stages behind it, so only this
     stage's wait and execution are counted. Under job-level SLOs the deadline is
-    the end of the pipeline, so the whole critical path through the job's
-    incomplete tasks is counted, each stage charged for the backlog standing in
-    front of it.
-
-    The walk mirrors [_get_processing_time]: stages that can run in parallel are
-    charged the slowest of them, since a join waits for its last incoming branch.
+    the end of the pipeline, so this stage is counted along with the longest path
+    through the stages downstream of it, each stage charged for the backlog standing
+    in front of it. Stages on parallel paths are left out, as they are there.
 
     [task] is charged only for the work its own queue serves ahead of it, since
     that is all it waits for. Its later stages are charged their model's whole
     backlog, which is the right question for a task that has not been queued yet:
-    it will arrive at the back of that queue. A stage of the same job that is
-    queued in parallel with [task] is charged the whole backlog too, since this
-    call sees only [task]'s own place in line.
+    it will arrive at the back of that queue.
 
     Args:
         time: Time at which the estimate is made
@@ -187,38 +166,30 @@ def get_remaining_time_with_queueing(time: float, task: Task, load_view,
     Returns:
         remaining: Time still needed, including queueing (ms)
     """
-    def _exec_time(model_data, this_stage: bool) -> float:
-        if this_stage and worker_size is not None \
-                and worker_size in model_data.batch_exec_times:
-            return model_data.batch_exec_times[worker_size][1]
+    # this stage: its own place in line, on the worker holding it if that is known
+    exec_times = task.model_data.batch_exec_times
+    if worker_size is not None and worker_size in exec_times:
+        exec_time = exec_times[worker_size][1]
+    else:
+        exec_time = get_min_exec_time(task.model_data)
 
-        return get_min_exec_time(model_data)
+    remaining = load_view.get_queue_delay(task.model_data.id, time, priority) + exec_time
 
     if gcfg.SLO_TYPE != "JOB_LEVEL":
-        return (load_view.get_queue_delay(task.model_data.id, time, priority)
-                + _exec_time(task.model_data, True))
+        return remaining
 
-    remaining = 0.0
-    for task_ids, models in _get_remaining_waves(task.job):
-        # every stage in this wave waits out its own model's backlog, and the wave
-        # is not done until its slowest stage is. Stages on the same model wait out
-        # the same backlog, so each model is charged once, except that [task] is
-        # charged for its own place in line
-        in_wave = task.task_id in task_ids
-        delays = []
-        for model_id, (model_data, count) in models.items():
-            if in_wave and model_id == task.model_data.id:
-                delays.append(load_view.get_queue_delay(model_id, time, priority)
-                              + _exec_time(task.model_data, True))
-                if count == 1:
-                    continue
+    # the stages after it, accumulated from the sinks backwards: the time to finish
+    # from a stage is its own plus that of the slowest stage following it
+    stage = _get_stage(task)
+    finish_times: dict[int, float] = {}
+    for s in stage.downstream:
+        finish_times[id(s)] = (
+            load_view.get_queue_delay(s.model_data.id, time)
+            + get_min_exec_time(s.model_data)
+            + max([finish_times[id(ns)] for ns in s.next_stages], default=0.0))
 
-            delays.append(load_view.get_queue_delay(model_id, time)
-                          + _exec_time(model_data, False))
-
-        remaining += max(delays)
-
-    return remaining
+    return remaining + max([finish_times[id(ns)] for ns in stage.next_stages],
+                           default=0.0)
 
 
 def _drops_task(policy: str, time: float, task: Task,
@@ -228,9 +199,9 @@ def _drops_task(policy: str, time: float, task: Task,
 
     The applicable deadline comes from [task.get_task_deadline]: the job deadline
     under JOB_LEVEL SLOs, this stage's deadline under NEXUS SLOs. LAZY drops only
-    once that deadline has already elapsed. EARLY drops as soon as it is
-    guaranteed to be missed: when [time] plus the remaining processing time already
-    exceeds it. Since remaining processing time is non-negative, EARLY drops
+    once that deadline has already elapsed. EARLY drops as soon as this task cannot
+    be expected to meet it: when [time] plus the remaining processing time of this
+    task and the stages downstream of it already exceeds it. Since remaining processing time is non-negative, EARLY drops
     whatever LAZY would, and never later than LAZY does.
 
     LOOKAHEAD tests the same inequality with a remaining time that also counts
@@ -288,12 +259,12 @@ def _decides_per_job(policy: str) -> bool:
     """Whether [policy] reaches the same verdict for every task of a job at one
     instant, so that a sweep need only test each job once.
 
-    Under job-level SLOs, LAZY and EARLY hold the job's own deadline against work
-    that does not depend on which of its tasks asks. LOOKAHEAD charges each task
-    for its own place in line, and per-stage SLOs give each stage its own
-    deadline, so neither can be decided once for the whole job.
+    Under job-level SLOs, LAZY holds only the job's own deadline against the time.
+    EARLY and LOOKAHEAD measure the work from the task that asks onwards, and
+    per-stage SLOs give each stage its own deadline, so none of those can be decided
+    once for the whole job.
     """
-    return gcfg.SLO_TYPE == "JOB_LEVEL" and policy in ("LAZY", "EARLY")
+    return gcfg.SLO_TYPE == "JOB_LEVEL" and policy == "LAZY"
 
 
 def should_drop_task(time: float, task: Task, worker_size: int | None = None,

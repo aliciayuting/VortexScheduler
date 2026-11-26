@@ -54,6 +54,9 @@ class Workflow:
         self.task_max_batch_sizes: dict[int, int] = {}
         self.task_deadline_offsets: dict[int, float] = {}
 
+        # drop_algo's cache of the stages downstream of each task
+        self.stages_cache = None
+
     def assign_task_slos(self, task_slos: dict[int, tuple[float, int]], job_slo: float):
         """Records a per-stage SLO split (see NexusSLOSplitter) and derives the
         deadline offset of each task from job create time.

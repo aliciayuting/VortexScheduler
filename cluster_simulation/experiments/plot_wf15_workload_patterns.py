@@ -14,9 +14,7 @@ sys.path.insert(0, str(SIM_DIR))
 from core.configs.wf15_workload import (  # noqa: E402
     DEFAULT_HORIZON_MS,
     DEFAULT_LINE_COUNT_STEPS,
-    DEFAULT_OBJECT_INTERVAL_MS,
     LineCountStep,
-    generate_object_arrivals,
 )
 
 
@@ -29,6 +27,7 @@ def scaled_profile(peak_lines: int) -> tuple[LineCountStep, ...]:
 
 
 def plot_patterns(peaks: list[int], output: Path) -> None:
+    plt.rcParams["font.size"] = 12
     fig, axes = plt.subplots(len(peaks), 1, figsize=(13, 2.5 * len(peaks)),
                              sharex=True, constrained_layout=True)
     if len(peaks) == 1:
@@ -45,22 +44,17 @@ def plot_patterns(peaks: list[int], output: Path) -> None:
                   linewidth=2.2, fill=True, alpha=0.13)
         ax.stairs(counts, times_s + [horizon_s], color=color,
                   linewidth=2.2)
-        arrivals = generate_object_arrivals(
-            horizon_ms=DEFAULT_HORIZON_MS,
-            object_interval_ms=DEFAULT_OBJECT_INTERVAL_MS,
-            line_count_steps=profile,
-            align_cycles=False,
-        )
-        ax.set_ylabel(f"{peak} peak\nlines")
+        ax.set_ylabel("Active lines")
         ax.set_ylim(0, peak * 1.28)
         ax.set_yticks([0, peak // 2, peak])
         ax.grid(axis="y", alpha=0.25)
-        ax.text(1.005, 0.5, f"{len(arrivals):,} objects",
-                transform=ax.transAxes, rotation=270, va="center", ha="left")
 
-    axes[-1].set_xlabel("Simulation time (seconds)")
+    axes[-1].set_xlabel("Simulation time (s)")
     axes[-1].set_xlim(0, horizon_s)
-    fig.suptitle("WF15 assembly-line workload patterns — staggered 3-second cycles")
+    title = "Pipeline3 assembly line workload"
+    if len(peaks) == 1:
+        title += f" (peak {peaks[0]} lines)"
+    fig.suptitle(title)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=180, bbox_inches="tight")
     plt.close(fig)

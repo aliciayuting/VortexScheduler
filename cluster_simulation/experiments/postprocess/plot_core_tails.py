@@ -9,12 +9,6 @@ sweep found best (bucket_size_sweep_optrate), at alternative rates
 (bucket_size_sweep_rate1). It is picked from those sweeps' summary.csv files, so
 it follows them if they are rerun.
 
-The optimal LOOKAHEAD ("LOOKAHEAD (optimal)") is the run of
-results/lookahead_single, which configures LOOKAHEAD with a range of job SLOs,
-that meets the core sweep's actual job SLO most often. It is only drawn when that
-is not the core SLO itself, and both LOOKAHEAD labels say which SLO LOOKAHEAD was
-configured with.
-
 Writes, into each core results directory's figures/:
     <name>_<workload>_tail.png      normalized tail CDF (all families)
     <name>_<workload>_tail_ms.png   tail CDF in ms (families in MS_PLOTS)
@@ -44,10 +38,6 @@ OPTIMAL_SWEEPS = [os.path.join(RESULTS, sweep) for sweep in
                    "bucket_size_sweep_rate1", "bucket_size_sweep_alitrace",
                    "bucket_size_sweep_wf15_staggered")]
 
-# LOOKAHEAD run across a range of job SLOs on the core sweep's traces
-# (run_lookahead_sweep.py), from which the optimal LOOKAHEAD is picked
-LOOKAHEAD_SWEEP = os.path.join(RESULTS, "lookahead_single")
-
 # adaptive token bucket runs (run_adaptive_bucket_sweep.py with a 200 job count
 # window and --grow-only-if-rejecting). Families it was not run for get no line
 ADAPTIVE_SWEEP = os.path.join(RESULTS, "adaptive_bucket_rejgrow")
@@ -62,8 +52,7 @@ CORE_RUNS = [("wf1_wf13_core", "ppl2", "wf1"),
 # core policies plotted, in legend order. The optimal token bucket goes in right
 # after the token bucket it tunes
 POLICIES = [("nodrop", "no-drop"), ("early", "EARLY"), ("nexus", "Nexus"),
-            ("lookahead", "LOOKAHEAD"), ("lookahead_optimal", "LOOKAHEAD (optimal)"),
-            ("token", "token-bucket"),
+            ("lookahead", "LOOKAHEAD"), ("token", "token-bucket"),
             ("optimal", "token-bucket (optimal)"),
             ("adaptive", "token-bucket (adaptive)"), ("rrdrop", "RR-drop")]
 
@@ -106,64 +95,6 @@ def optimal_bucket(family: str, workload: str) -> pd.Series:
     return rows.loc[rows["slo_met"].idxmax()]
 
 
-def _slo_met(run: str, slo: float) -> float:
-    """Share of [run]'s jobs that finished within [slo] ms, counting jobs that
-    never finished as misses."""
-    jobs = pd.read_csv(os.path.join(run, "sim_logs", "job_log.csv"))
-    return (jobs["was_completed"].astype(bool) & (jobs["response_time"] <= slo)).mean()
-
-
-def _slo_level(level: str) -> float:
-    """Sort key of a lookahead sweep SLO level, <multiple>x or <slo>ms."""
-    return float(level[:-2] if level.endswith("ms") else level[:-1])
-
-
-def optimal_lookahead(core_dir: str, family: str, name: str,
-                      workload: str) -> tuple[str, str, str | None]:
-    """Picks the LOOKAHEAD run that best meets the core sweep's job SLO.
-
-    LOOKAHEAD drops against the deadline it is configured with. Configuring a
-    looser one than the SLO jobs are actually held to can still serve more of
-    them on time, since it stops LOOKAHEAD shedding jobs it predicts to be only a
-    little late. LOOKAHEAD_SWEEP runs it at a range of job SLOs on the core sweep's
-    traces; each run is scored here on the core SLO, read from the core LOOKAHEAD
-    run's own deadlines.
-
-    Returns:
-        core_level: SLO level of the core sweep's own LOOKAHEAD run
-        best_run: LOOKAHEAD_SWEEP run with the highest attainment of the core SLO
-        best_level: its SLO level, or None if it is the core level, in which case
-        best_run is the core run over again and is not worth a line of its own
-    """
-    core_run = os.path.join(RESULTS, core_dir, f"{family}_{workload}_lookahead")
-    jobs = pd.read_csv(os.path.join(core_run, "sim_logs", "job_log.csv"))
-    slo = (jobs["deadline"] - jobs["create_time"]).iloc[0]
-
-    prefix = f"{name}_{workload}_"
-    suffix = "_fcfs_ahead"
-    runs = {d[len(prefix):-len(suffix)]: os.path.join(LOOKAHEAD_SWEEP, d)
-            for d in os.listdir(LOOKAHEAD_SWEEP)
-            if d.startswith(prefix) and d.endswith(suffix)}
-    assert(runs), f"No {name} {workload} runs in {LOOKAHEAD_SWEEP}"
-
-    # the level the core sweep held this family to, i.e. the one whose jobs carry
-    # the core SLO as their deadline
-    def run_slo(run: str) -> float:
-        jobs = pd.read_csv(os.path.join(run, "sim_logs", "job_log.csv"), nrows=1)
-        return (jobs["deadline"] - jobs["create_time"]).iloc[0]
-
-    core_levels = [level for level, run in runs.items() if abs(run_slo(run) - slo) < 1e-6]
-    assert(len(core_levels) == 1), \
-        f"Expected one {name} {workload} run at the core SLO {slo:g} ms, found {core_levels}"
-    core_level = core_levels[0]
-
-    # the core level first, then the rest in order, so ties keep the core run
-    levels = [core_level] + sorted((l for l in runs if l != core_level), key=_slo_level)
-    best = max(levels, key=lambda level: _slo_met(runs[level], slo))
-
-    return core_level, runs[best], None if best == core_level else best
-
-
 def bucket_label(label: str, run: str) -> str:
     """Appends to [label] the refill rate (as a fraction of the estimated capacity)
     and bucket size (jobs) the token bucket run [run] actually used."""
@@ -186,19 +117,11 @@ def adaptive_label(label: str, run: str) -> str:
 
 def plot(core_dir: str, family: str, name: str, workload: str):
     best = optimal_run(family, workload)
-    core_level, best_lookahead, best_level = optimal_lookahead(core_dir, family, name,
-                                                               workload)
-    print(f"{name} {workload}: optimal token bucket = {os.path.basename(best)}, "
-          f"optimal LOOKAHEAD SLO = {best_level or core_level}"
-          + ("" if best_level else " (the core run)"))
+    print(f"{name} {workload}: optimal token bucket = {os.path.basename(best)}")
 
     srcs, labels = [], []
     for policy, label in POLICIES:
-        if policy == "lookahead_optimal":
-            if best_level is None:
-                continue
-            run, label = best_lookahead, f"{label} (SLO {best_level})"
-        elif policy == "adaptive":
+        if policy == "adaptive":
             run = os.path.join(ADAPTIVE_SWEEP, f"{family}_{workload}_adaptive")
             if not os.path.isdir(run):
                 continue
@@ -212,8 +135,6 @@ def plot(core_dir: str, family: str, name: str, workload: str):
         assert(os.path.isdir(logs)), f"Missing results for {label}: {logs}"
         if policy in ("token", "optimal"):
             label = bucket_label(label, run)
-        elif policy == "lookahead":
-            label = f"{label} (SLO {core_level})"
         srcs.append(logs)
         labels.append(label)
 
