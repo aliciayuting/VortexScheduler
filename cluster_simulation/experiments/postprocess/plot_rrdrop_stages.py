@@ -4,8 +4,9 @@ how large the batches each model executed were and at which stage jobs were shed
 Batch sizes come from each run's worker_batch_log.csv. A model's histogram gives,
 for each batch size, the share of the tasks it executed that ran in a batch of
 that size, i.e. the share of jobs whose task at that stage did, counting a job
-once per stage when several of its stages run the same model. Models that never
-batch (a maximum batch size of 1) are left out.
+once per stage when several of its stages run the same model. Each panel is
+labelled with the model's mean batch size over the batches it ran. Models that
+never batch (a maximum batch size of 1) are left out.
 
 Drop stages come from the job log, for the policies that drop jobs in flight
 (admission control rejects jobs before they reach any stage, and is left out). A
@@ -44,6 +45,7 @@ from run_rrdrop_sweep import CORE_DIRS, NAMES
 LABEL_FONTSIZE = 20
 TICK_FONTSIZE = 16
 TITLE_FONTSIZE = 17
+MEAN_FONTSIZE = 15
 # the drop stage figure is a single short row, so it can carry larger text
 DROP_LABEL_FONTSIZE = 20
 DROP_TICK_FONTSIZE = 16
@@ -59,6 +61,15 @@ MODEL_NAMES = {20: "cow ID OCR", 21: "teat segmentation",
 def _short(label: str) -> str:
     """The policy name of a legend label, without its parameters."""
     return label.split(" (")[0]
+
+
+def _two_lines(label: str) -> str:
+    """[label] broken at the space nearest its middle."""
+    spaces = [i for i, c in enumerate(label) if c == " "]
+    if not spaces:
+        return label
+    cut = min(spaces, key=lambda i: abs(i - len(label) / 2))
+    return label[:cut] + "\n" + label[cut + 1:]
 
 
 def _jobs(logs: str) -> pd.DataFrame:
@@ -132,6 +143,10 @@ def plot_batch_sizes(logs: list[str], labels: list[str], colors: list, out: str)
             tasks = sizes.value_counts().reindex(range(1, largest[model] + 1), fill_value=0) \
                 * np.arange(1, largest[model] + 1)
             ax.bar(tasks.index, tasks / tasks.sum(), color=color, width=0.8)
+            # the mean over batches (tasks executed / batches run), not over the
+            # tasks the bars weight by
+            ax.text(0.98, 0.97, f"mean {sizes.mean():.2f}", transform=ax.transAxes,
+                    ha="right", va="top", fontsize=MEAN_FONTSIZE, color="0.25")
             ax.set_xticks(range(1, largest[model] + 1))
             ax.set_ylim(0, 1)
             ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{100 * v:.0f}%"))
@@ -140,7 +155,7 @@ def plot_batch_sizes(logs: list[str], labels: list[str], colors: list, out: str)
                 ax.set_title(MODEL_NAMES.get(model, f"model {model}"), fontsize=TITLE_FONTSIZE)
             if row < len(logs) - 1:
                 ax.tick_params(labelbottom=False)
-        axes[row][0].set_ylabel(_short(label).replace(" ", "\n", 1), fontsize=TITLE_FONTSIZE,
+        axes[row][0].set_ylabel(_two_lines(_short(label)), fontsize=TITLE_FONTSIZE,
                                 rotation=0, ha="right", va="center", labelpad=22)
 
     fig.supxlabel("Batch size", fontsize=LABEL_FONTSIZE)

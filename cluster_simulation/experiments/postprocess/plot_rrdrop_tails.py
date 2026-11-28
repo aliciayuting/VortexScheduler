@@ -44,6 +44,10 @@ MS_XMAX_SLOS = 2
 # token buckets tune
 SKIPPED = {"token"}
 
+# the RR-drop baseline rejects jobs at admission, so these figures name it, and its
+# drop rate, as admission control
+RRDROP_LABEL = "RR admission control"
+
 
 def rrdrop_rate(src: str, family: str, workload: str) -> float:
     """The share of jobs the RR-drop rerun of [family] under [workload] rejects."""
@@ -71,7 +75,7 @@ def policy_runs(src: str, family: str, workload: str) -> tuple[list[str], list[s
         elif policy == "optimal":
             run = pct.optimal_run(family, workload)
         elif policy == "rrdrop":
-            run, label = rrdrop, f"{label} ({100 * drop_rate:.1f}% dropped)"
+            run, label = rrdrop, f"{RRDROP_LABEL} ({100 * drop_rate:.1f}% rejected)"
         else:
             run = os.path.join(pct.RESULTS, core_dir, f"{family}_{workload}_{policy}")
 
