@@ -1,7 +1,7 @@
 """Plots the core sweep's tail CDFs, one figure per workflow and workload, with
 the best static token bucket alongside the core policies.
 
-The best static token bucket ("token-bucket (optimal)") is the run with the
+The best static token bucket ("optimal token bucket") is the run with the
 highest SLO attainment for that workflow and workload across the bucket size
 sweeps in OPTIMAL_SWEEPS: bucket sizes swept at the refill rate the refill rate
 sweep found best (bucket_size_sweep_optrate), at alternative rates
@@ -51,10 +51,15 @@ CORE_RUNS = [("wf1_wf13_core", "ppl2", "wf1"),
 
 # core policies plotted, in legend order. The optimal token bucket goes in right
 # after the token bucket it tunes
-POLICIES = [("nodrop", "no-drop"), ("early", "EARLY"), ("nexus", "Nexus"),
-            ("lookahead", "LOOKAHEAD"), ("token", "token-bucket"),
-            ("optimal", "token-bucket (optimal)"),
-            ("adaptive", "token-bucket (adaptive)"), ("rrdrop", "RR-drop")]
+# Labels are lowercase apart from acronyms
+POLICIES = [("nodrop", "no drop"), ("early", "lazy"), ("nexus", "per-stage SLO split"),
+            ("lookahead", "lookahead"), ("token", "token bucket"),
+            ("optimal", "optimal token bucket"),
+            ("adaptive", "adaptive token bucket"), ("rrdrop", "RR drop")]
+
+# plot_tail options shared by every figure: a legend small enough to leave the
+# curves visible and kept off them, and a dashed line at the SLO
+COMMON = ["--legend-fontsize", "12", "--slo-line", "--clear-legend"]
 
 # plot_tail options for the normalized figure of each family
 NORMALIZED = {"ppl2": ["--normalize", "--xmax", "10"],
@@ -100,7 +105,7 @@ def bucket_label(label: str, run: str) -> str:
     and bucket size (jobs) the token bucket run [run] actually used."""
     adm = pd.read_csv(os.path.join(run, "sim_logs", "admission_control.csv")).iloc[0]
     rate = adm["admit_rate_qps"] / adm["estimated_capacity_qps"]
-    return f"{label} (rate {rate:.2g}×cap, bucket {adm['burst_size_jobs']:.1f})"
+    return f"{label} (rate {rate:.2g}×, size {adm['burst_size_jobs']:.1f})"
 
 
 def adaptive_label(label: str, run: str) -> str:
@@ -112,7 +117,7 @@ def adaptive_label(label: str, run: str) -> str:
     resizes = pd.read_csv(os.path.join(logs, "adaptive_bucket_log.csv"))
     rate = adm["admit_rate_qps"] / adm["estimated_capacity_qps"]
     sizes = [adm["default_burst_size_jobs"]] + list(resizes["depth_after"])
-    return f"{label} (rate {rate:.2g}×cap, bucket {min(sizes):.1f}–{max(sizes):.1f})"
+    return f"{label} (rate {rate:.2g}×, size {min(sizes):.1f}–{max(sizes):.1f})"
 
 
 def plot(core_dir: str, family: str, name: str, workload: str):
@@ -147,7 +152,7 @@ def plot(core_dir: str, family: str, name: str, workload: str):
         variants.append(([], f"{name}_{workload}_tail_ms.png"))
 
     for options, out in variants:
-        subprocess.run([sys.executable, plot_tail, "--pdf"] + options
+        subprocess.run([sys.executable, plot_tail, "--pdf"] + COMMON + options
                        + ["--srcs"] + srcs + ["--labels"] + labels
                        + ["--out", os.path.join(fig_dir, out)], check=True)
 

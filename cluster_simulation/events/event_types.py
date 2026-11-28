@@ -129,7 +129,8 @@ EVENT_TYPES: dict[int, EventType] = {
 
     EventIds.JOBS_DROPPED: EventType(
         EventIds.JOBS_DROPPED, "Jobs Dropped",
-        kwargs={"job_ids": True},
+        # model_id: the model whose queue a worker dropped the jobs from
+        kwargs={"job_ids": True, "model_id": False},
         emitter_types=[Agent.SCHEDULER, Agent.WORKER],
         listener_types=[Agent.SCHEDULER, Agent.WORKER, Agent.CLIENT, Agent.LOGGER, Agent.VERIFIER]),
 

@@ -402,14 +402,16 @@ class Simulation:
         SHADOW_DROP_POLICY would have done to it: whether it would have been
         dropped, when, and at which stage. Those columns are empty unless
         SHADOW_DROP_POLICY is set, and always empty of consequence, since a shadow
-        dropped job ran to completion like any other.
+        dropped job ran to completion like any other. A job a drop policy dropped
+        also carries the model whose queue it was dropped from.
         """
         shadow_drops = self.logger.shadow_dropped_jobs
+        drop_models = self.logger.drop_models
 
         jobs_df = pd.DataFrame(columns=["client_id", "workflow_id", "job_id", "was_completed",
                                         "deadline", "create_time", "response_time",
                                         "was_shadow_dropped", "shadow_drop_time",
-                                        "shadow_drop_task_id"])
+                                        "shadow_drop_task_id", "drop_model_id"])
         for client in self.clients:
             for jid, (create_time, finish_time, was_completed, deadline, job) in client.jobs.items():
                 shadow_drop_time, shadow_drop_task_id = shadow_drops.get(jid, (np.nan, np.nan))
@@ -423,6 +425,7 @@ class Simulation:
                     "response_time": finish_time - create_time,
                     "was_shadow_dropped": jid in shadow_drops,
                     "shadow_drop_time": shadow_drop_time,
-                    "shadow_drop_task_id": shadow_drop_task_id
+                    "shadow_drop_task_id": shadow_drop_task_id,
+                    "drop_model_id": drop_models.get(jid, np.nan)
                 }
         jobs_df.to_csv(os.path.join(self.out_path, "job_log.csv"))

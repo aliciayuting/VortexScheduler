@@ -130,7 +130,7 @@ def plot_summary(summary: pd.DataFrame, out_path: str):
 
 def plot_tails(src: str, fig_dir: str):
     """One normalized tail CDF per workflow and workload, a series per refill rate
-    shaded light (lowest) to dark (highest)."""
+    shaded light (lowest) to dark (highest), with a dashed line at the SLO."""
     plot_tail = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plot_tail.py")
     for family, _ in FAMILIES:
         for workload, _, _ in SERIES:
@@ -140,7 +140,7 @@ def plot_tails(src: str, fig_dir: str):
             if not runs:
                 continue
             subprocess.run(
-                [sys.executable, plot_tail, "--pdf", "--normalize",
+                [sys.executable, plot_tail, "--pdf", "--normalize", "--slo-line",
                  "--xmax", str(TAIL_XMAX.get(family, 10))]
                 + (["--minus-delay"] if family in MINUS_DELAY else [])
                 + ["--srcs"] + [d for _, d in runs]

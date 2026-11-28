@@ -178,9 +178,10 @@ def plot_summary(summary: pd.DataFrame, out_path: str):
     plt.close(fig)
 
 
-def plot_tails(src: str, fig_dir: str):
+def plot_tails(src: str, fig_dir: str, slo_line: bool = False):
     """One normalized tail CDF per workflow and workload, a series per bucket size
-    shaded light (0.25x) to dark (2x)."""
+    shaded light (0.25x) to dark (2x), with a dashed line at the SLO if
+    [slo_line]."""
     plot_tail = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plot_tail.py")
     for family, _ in FAMILIES:
         for workload, _, _ in SERIES:
@@ -192,6 +193,7 @@ def plot_tails(src: str, fig_dir: str):
                 [sys.executable, plot_tail, "--pdf", "--normalize",
                  "--xmax", str(TAIL_XMAX.get(family, 10))]
                 + (["--minus-delay"] if family in MINUS_DELAY else [])
+                + (["--slo-line"] if slo_line else [])
                 + ["--srcs"] + [r for _, r in runs]
                 + ["--labels"] + [f"bucket {s:g}×" for s, _ in runs]
                 + ["--groups"] + ["bucket size"] * len(runs)
@@ -202,6 +204,8 @@ def plot_tails(src: str, fig_dir: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--src", type=str, required=True, help="Sweep results directory")
+    parser.add_argument("--slo-line", action="store_true",
+                        help="Mark the SLO on the tail CDFs with a dashed line")
     args = parser.parse_args()
 
     fig_dir = os.path.join(args.src, "figures")
@@ -210,5 +214,5 @@ if __name__ == "__main__":
     summary = summarize(args.src)
     summary.to_csv(os.path.join(args.src, "summary.csv"), index=False)
     plot_summary(summary, os.path.join(fig_dir, "bucket_size_sweep.png"))
-    plot_tails(args.src, fig_dir)
+    plot_tails(args.src, fig_dir, args.slo_line)
     print(f"wrote {args.src}/summary.csv and {fig_dir}/")

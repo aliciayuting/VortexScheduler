@@ -7,6 +7,8 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.path import Path
+from matplotlib.ticker import LogFormatterSciNotation
 
 import argparse
 
@@ -306,14 +308,41 @@ def _keyed(keys: list[str], values: list, count: int, what: str) -> list:
     return [values[order.index(k)] for k in keys]
 
 
+# text sizes (pt), sized for the 8 x 6 in figure to stay legible once scaled
+# down into a paper column
+LABEL_FONTSIZE = 16
+TICK_FONTSIZE = 14
+LEGEND_FONTSIZE = 13
+# legends longer than this shrink to SMALL_LEGEND_FONTSIZE so they leave the curves
+# visible
+LONG_LEGEND_ENTRIES = 8
+SMALL_LEGEND_FONTSIZE = 11
+
+
+def _legend_fontsize(num_entries: int, override: float | None = None) -> float:
+    if override is not None:
+        return override
+    return LEGEND_FONTSIZE if num_entries <= LONG_LEGEND_ENTRIES else SMALL_LEGEND_FONTSIZE
+
+
+
+# legend_loc that puts the legend outside the axes, under the x axis label, with
+# its right edge on the axes' right edge
+BELOW_RIGHT = "below right"
+
+
 def _legend(ax, labels: list[str], colors: list, hues: list[str] | None,
-            styles: list[str] | None, linestyles: list[str]):
+            styles: list[str] | None, linestyles: list[str],
+            fontsize: float | None = None, loc: str = "best",
+            ncol: int | None = None, **kwargs):
     """Draws the legend. With [hues] or [styles] it lists each colour and each
     dash pattern once, rather than every series, so a comparison of N policies
-    under M variants takes N + M entries instead of N * M.
+    under M variants takes N + M entries instead of N * M. [ncol] defaults to
+    two columns past 8 series and one otherwise. [kwargs] go to ax.legend.
     """
     if hues is None and styles is None:
-        ax.legend(ncol=2 if len(labels) > 8 else 1, fontsize="small")
+        ax.legend(ncol=ncol or (2 if len(labels) > 8 else 1), loc=loc,
+                  fontsize=_legend_fontsize(len(labels), fontsize), **kwargs)
         return
 
     handles = []
@@ -323,7 +352,76 @@ def _legend(ax, labels: list[str], colors: list, hues: list[str] | None,
     for key in dict.fromkeys(styles or []):
         i = styles.index(key)
         handles.append(Line2D([], [], color="0.3", linestyle=linestyles[i], label=key))
-    ax.legend(handles=handles, fontsize="small")
+    ax.legend(handles=handles, loc=loc, ncol=ncol or 1,
+              fontsize=_legend_fontsize(len(handles), fontsize), **kwargs)
+
+
+# gid and style of the SLO marker lines
+SLO_GID = "slo"
+SLO_STYLE = dict(color="0.25", linestyle="--", linewidth=1.5, zorder=1)
+# the SLO marker drawn to stand out: darker, thicker, longer dashes, and above
+# the curves rather than behind them
+BOLD_SLO_STYLE = dict(color="black", linestyle=(0, (6, 3)), linewidth=2.5, zorder=3)
+
+
+def _legend_overlaps(ax) -> bool:
+    """Whether any curve on [ax] passes under its legend. The SLO marker spans the
+    full height, so no legend could avoid it; it passes behind the legend's
+    opaque frame instead."""
+    fig = ax.figure
+    fig.canvas.draw()
+    box = ax.get_legend().get_window_extent()
+    for line in ax.get_lines():
+        if line.get_gid() == SLO_GID:
+            continue
+        xy = line.get_xydata()
+        xy = xy[np.isfinite(xy).all(axis=1)]
+        if len(xy) and Path(line.get_transform().transform(xy)).intersects_bbox(box, filled=False):
+            return True
+    return False
+
+
+def _clear_legend(ax, draw_legend, upward: bool = False, max_tries: int = 6):
+    """Redraws the legend with [draw_legend] until it covers no line, each time
+    opening an empty band on the log y axis as tall as the legend for it to sit
+    in: below the curves, where matplotlib's "best" placement can find it, or
+    with [upward] above them, for a legend pinned to the top of the axes."""
+    # the y tick labels as drawn before any band is added: a taller axis spans
+    # more decades, and matplotlib would stop labelling the ticks between them
+    ax.figure.canvas.draw()
+    ticks = {minor: [(t.get_loc(), t.label1.get_text())
+                     for t in (ax.yaxis.get_minor_ticks() if minor
+                               else ax.yaxis.get_major_ticks())]
+             for minor in (False, True)}
+    lo, hi = ax.get_ylim()
+
+    for attempt in range(max_tries):
+        if not _legend_overlaps(ax):
+            break
+        box = ax.get_legend().get_window_extent().transformed(ax.transAxes.inverted())
+        bottom, top = (np.log10(v) for v in ax.get_ylim())
+        # the band takes [share] of the new axis, a little more each try
+        share = min(box.height + 0.04 * (attempt + 1), 0.6)
+        if upward:
+            # measured from the highest curve, not the old top, so the band
+            # replaces the margin above the curves instead of adding to it
+            peak = np.log10(max(np.nanmax(line.get_ydata()) for line in ax.get_lines()
+                                if line.get_gid() != SLO_GID))
+            ax.set_ylim(top=10 ** (peak + share * (peak - bottom) / (1 - share)))
+        else:
+            ax.set_ylim(bottom=10 ** (bottom - share * (top - bottom) / (1 - share)))
+        draw_legend()
+        ax.get_legend().get_frame().set_alpha(1)
+
+    if upward and ax.get_ylim()[1] > hi:
+        # restore the original ticks and labels; none go above 1, which a tail
+        # CDF never exceeds, so the band above the curves stays blank
+        new_lo, new_hi = ax.get_ylim()
+        for minor, drawn in ticks.items():
+            drawn = [(loc, text) for loc, text in drawn if lo <= loc <= min(hi, 1 + 1e-9)]
+            ax.set_yticks([loc for loc, _ in drawn], [text for _, text in drawn],
+                          minor=minor)
+        ax.set_ylim(new_lo, new_hi)
 
 
 def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: bool,
@@ -333,7 +431,15 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
                                 groups: list[str] | None = None,
                                 hues: list[str] | None = None,
                                 styles: list[str] | None = None,
-                                per_slo: bool = False):
+                                per_slo: bool = False,
+                                legend_fontsize: float | None = None,
+                                slo_line: bool = False,
+                                clear_legend: bool = False,
+                                legend_loc: str = "best",
+                                xmax_slos: float | None = None,
+                                legend_ncol: int | None = None,
+                                bold_slo: bool = False,
+                                minor_labels: bool = False):
     """Plots the tail CDF of job response time for every run in [srcs].
 
     The two options are independent and may be combined:
@@ -370,6 +476,21 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
         styles: Dash pattern key per run. Runs sharing a key share a dash pattern,
         and the legend lists each key once
         per_slo: X axis in multiples of each job's SLO rather than ms or job size
+        legend_fontsize: Legend text size (pt), overriding the default for the
+        number of entries
+        slo_line: Mark each workflow's SLO with a dashed vertical line, at the
+        SLO measured on the same x axis as the response times
+        clear_legend: Keep the legend off every line, making room for it below
+        the curves if need be (see [_clear_legend]); single-axes figures only
+        legend_loc: Where to put the legend, as matplotlib's legend loc, or
+        BELOW_RIGHT for under the axes; the saved figure then grows to fit it
+        xmax_slos: With the x axis in ms, end it at this multiple of the largest
+        job SLO (deadline - create time) among the runs, rather than at the
+        slowest response time
+        legend_ncol: Number of legend columns, overriding the default
+        bold_slo: Draw the SLO marker darker and thicker, above the curves
+        minor_labels: Label some minor y ticks (e.g. 2 and 5 x 10^k) on axes
+        spanning up to 2.5 decades, which otherwise label only the powers of 10
     """
     labels = [name for _, name in srcs]
     if hues is not None:
@@ -393,7 +514,13 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
         thresholds = np.linspace(0, max_job_size_multiple, 250)
         xlabel = "Response time as multiple of job size"
     else:
-        thresholds = np.arange(0, max_res, 1)
+        if xmax_slos is None:
+            thresholds = np.arange(0, max_res, 1)
+        else:
+            # rounded, since deadline - create time carries float error
+            slo = max((data["deadline"] - data["create_time"]).round(6).max()
+                      for _, data, _ in loaded_srcs)
+            thresholds = np.arange(0, xmax_slos * slo + 1, 1)
         xlabel = "Response time (ms)"
 
     def _exceedance_counts(response_times, scale: tuple[float, float]) -> np.ndarray:
@@ -416,6 +543,27 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
             return stage_runtime, job_size - stage_runtime
         return (critical_paths[wf][0], 0.0) if normalize_by_job_size else (1.0, 0.0)
 
+    def _slo_positions(loaded, wf=None) -> list[float]:
+        """Distinct x positions of the job SLOs (deadline - create time) of the
+        runs in [loaded], restricted to workflow [wf] if given, scaled as the
+        response times are."""
+        positions = set()
+        for _, data, critical_paths in loaded:
+            for w in sorted(set(data["workflow_id"])):
+                if wf is not None and w != wf:
+                    continue
+                jobs = data.loc[data["workflow_id"] == w]
+                unit, offset = _workflow_scale(critical_paths, data, w)
+                for slo in (jobs["deadline"] - jobs["create_time"]).unique():
+                    positions.add(round((slo - offset) / unit, 6))
+        return sorted(positions)
+
+    def _mark_slos(ax, positions: list[float]):
+        for x in positions:
+            if thresholds[0] <= x <= thresholds[-1]:
+                ax.axvline(x, label="_nolegend_", gid=SLO_GID,
+                           **(BOLD_SLO_STYLE if bold_slo else SLO_STYLE))
+
     if split_by_workflow:
         # collect all workflows across all loaded dataframes
         all_workflows = sorted(set().union(*[
@@ -428,8 +576,10 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
         wf2ax = {wf: ax for wf, ax in zip(all_workflows, axes)}
 
         for ax, wf in zip(axes, all_workflows):
-            ax.set_title(f"Workflow {wf}")
+            ax.set_title(f"Workflow {wf}", fontsize=LABEL_FONTSIZE)
+            ax.tick_params(which="both", labelsize=TICK_FONTSIZE)
             ax.set_yscale("log")
+            ax.set_xlim(thresholds[0], thresholds[-1])
             ax.grid(True, which="both")
 
         for i, (name, data, critical_paths) in enumerate(loaded_srcs):
@@ -442,11 +592,16 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
                 wf2ax[wf].plot(thresholds, cdf, label=name, color=palette[i],
                                linestyle=linestyles[i])
 
-        for ax in axes:
-            _legend(ax, labels, palette, hues, styles, linestyles)
-            ax.set_xlabel(xlabel)
+        if slo_line:
+            for wf, ax in wf2ax.items():
+                _mark_slos(ax, _slo_positions(loaded_srcs, wf))
 
-        axes[0].set_ylabel("Tail CDF")
+        for ax in axes:
+            _legend(ax, labels, palette, hues, styles, linestyles, legend_fontsize,
+                    legend_loc, legend_ncol)
+            ax.set_xlabel(xlabel, fontsize=LABEL_FONTSIZE)
+
+        axes[0].set_ylabel("Tail CDF", fontsize=LABEL_FONTSIZE)
         plt.tight_layout()
 
     else:
@@ -466,16 +621,41 @@ def plot_response_time_tail_cdf(srcs: list[tuple[str, str]], split_by_workflow: 
             plt.plot(thresholds, cdf, label=name, color=palette[i],
                      linestyle=linestyles[i])
 
-        plt.xlabel(xlabel)
-        plt.ylabel("Tail CDF")
-        plt.title("Tail CDF")
+        plt.xlabel(xlabel, fontsize=LABEL_FONTSIZE)
+        plt.ylabel("Tail CDF", fontsize=LABEL_FONTSIZE)
+        plt.tick_params(axis="both", which="both", labelsize=TICK_FONTSIZE)
         plt.grid(True, which="both")
         plt.yscale("log")
-        _legend(plt.gca(), labels, palette, hues, styles, linestyles)
-        plt.tight_layout()
+        if minor_labels:
+            # matplotlib's default stops labelling minor ticks past one decade
+            plt.gca().yaxis.set_minor_formatter(
+                LogFormatterSciNotation(labelOnlyBase=False, minor_thresholds=(2.5, 0.5)))
+        # end the axis where the curves end rather than padding past them
+        plt.xlim(thresholds[0], thresholds[-1])
+        if slo_line:
+            _mark_slos(plt.gca(), _slo_positions(loaded_srcs))
+        ax = plt.gca()
+        if legend_loc == BELOW_RIGHT:
+            # lay out the axes alone, then hang the legend under the x axis label
+            plt.tight_layout()
+            ax.figure.canvas.draw()
+            label = ax.xaxis.label.get_window_extent().transformed(ax.transAxes.inverted())
+            _legend(ax, labels, palette, hues, styles, linestyles, legend_fontsize,
+                    "upper right", legend_ncol, bbox_to_anchor=(1, label.y0 - 0.02),
+                    bbox_transform=ax.transAxes, borderaxespad=0)
+        else:
+            draw_legend = lambda: _legend(ax, labels, palette, hues, styles, linestyles,
+                                          legend_fontsize, legend_loc, legend_ncol)
+            draw_legend()
+            plt.tight_layout()
+        if clear_legend and legend_loc != BELOW_RIGHT:
+            ax.get_legend().get_frame().set_alpha(1)
+            _clear_legend(ax, draw_legend, upward="upper" in legend_loc)
+            plt.tight_layout()
 
     if save_fig:
-        plt.savefig(out_path)
+        # a legend under the axes lies outside the figure until it grows to fit
+        plt.savefig(out_path, bbox_inches="tight" if legend_loc == BELOW_RIGHT else None)
     else:
         plt.show()
 
@@ -519,6 +699,29 @@ if __name__ == "__main__":
     parser.add_argument("--per-slo", action="store_true",
                         help="Plot response time as a multiple of each job's SLO "
                              "instead of in ms. --xmax is then in multiples of SLO")
+    parser.add_argument("--slo-line", action="store_true",
+                        help="Mark each workflow's SLO with a dashed vertical line")
+    parser.add_argument("--clear-legend", action="store_true",
+                        help="Keep the legend off every line, lowering the y axis "
+                             "to make room below the curves if need be")
+    parser.add_argument("--xmax-slos", type=float,
+                        help="Without --normalize, end the x axis at this multiple "
+                             "of the job SLO instead of at the slowest response")
+    parser.add_argument("--legend-loc", type=str, default="best",
+                        help="Legend position, as matplotlib's legend loc, or "
+                             f"'{BELOW_RIGHT}' for under the axes (default: best)")
+    parser.add_argument("--bold-slo", action="store_true",
+                        help="With --slo-line, draw the SLO marker darker and "
+                             "thicker, above the curves")
+    parser.add_argument("--minor-labels", action="store_true",
+                        help="Label some minor y ticks on axes spanning up to 2.5 "
+                             "decades")
+    parser.add_argument("--legend-ncol", type=int,
+                        help="Number of legend columns (default: 2 past 8 "
+                             "entries, else 1)")
+    parser.add_argument("--legend-fontsize", type=float,
+                        help="Legend text size in pt (default: 13, or 11 past "
+                             "8 entries)")
 
     args = parser.parse_args()
 
@@ -534,4 +737,7 @@ if __name__ == "__main__":
 
     plot_response_time_tail_cdf(srcs, args.split, args.normalize, args.pdf, out_path,
                                 args.xmax, args.minus_delay, args.groups, args.hues,
-                                args.styles, args.per_slo)
+                                args.styles, args.per_slo, args.legend_fontsize,
+                                args.slo_line, args.clear_legend, args.legend_loc,
+                                args.xmax_slos, args.legend_ncol, args.bold_slo,
+                                args.minor_labels)

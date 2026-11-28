@@ -340,7 +340,8 @@ class Worker(EventListener):
         self.em.add_event(
             Event(time,
                   EVENT_TYPES[EventIds.JOBS_DROPPED],
-                  kwargs={"job_ids": newly_dropped}),
+                  # the model whose queue the drop was decided at, for the job log
+                  kwargs={"job_ids": newly_dropped, "model_id": model_id}),
             self.emitter_id)
 
 

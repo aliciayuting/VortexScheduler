@@ -116,7 +116,8 @@ def spike_windows(run_dir: str) -> list[tuple[float, float]]:
     for client in clients:
         for cfg in client.values():
             start = 0.0
-            for phase in cfg["WORKLOAD"]["PHASES"]:
+            # a replayed trace has no phases, and so no scheduled spikes
+            for phase in cfg["WORKLOAD"].get("PHASES", []):
                 if phase.get("KIND") == "BURST" and not phase.get("STOCHASTIC", True):
                     quiet, burst = phase["QUIET_DURATION"], phase["BURST_DURATION"]
                     t = start + quiet

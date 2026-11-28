@@ -67,6 +67,17 @@ class Logger(EventListener):
         # a shadow dropped job keeps running and going on to spawn more tasks.
         self._shadow_dropped: dict[int, tuple[float, int]] = {}
 
+        # job_id -> model whose queue the job was dropped from, for every job a
+        # drop policy dropped
+        self._drop_models: dict[int, int] = {}
+
+    @property
+    def drop_models(self) -> dict[int, int]:
+        """Job ID -> ID of the model whose queue the job was dropped from, for every
+        job DROP_POLICY dropped. Jobs rejected by admission control are not in it.
+        """
+        return self._drop_models
+
     @property
     def shadow_dropped_jobs(self) -> dict[int, tuple[float, int]]:
         """Job ID -> (time, task ID) of the first shadow drop reported for it, for
@@ -250,6 +261,8 @@ class Logger(EventListener):
                     continue
 
                 self.unfinished_jobs.remove(job_id)
+                if "model_id" in event.kwargs:
+                    self._drop_models[job_id] = event.kwargs["model_id"]
                 for key in self._job_task_keys.get(job_id, []):
                     self._task_log_rows[self._task_idx[key]]["dropped_timestamp"] = event.time
 
